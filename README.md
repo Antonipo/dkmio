@@ -1,5 +1,9 @@
 # dkmio
 
+[![Tests](https://github.com/Antonipo/dkmio/actions/workflows/tests.yml/badge.svg)](https://github.com/Antonipo/dkmio/actions/workflows/tests.yml)
+[![PyPI](https://img.shields.io/pypi/v/dkmio)](https://pypi.org/project/dkmio/)
+[![Python](https://img.shields.io/pypi/pyversions/dkmio)](https://pypi.org/project/dkmio/)
+
 Efficient OKM (Object-Key Mapping) for AWS DynamoDB in Python. Define your tables with just keys and indexes, then use a fluent API that handles expression building, attribute escaping, pagination, and error mapping automatically.
 
 ```python
