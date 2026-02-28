@@ -19,16 +19,16 @@ jobs:
       - uses: astral-sh/setup-uv@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        run: uv python install ${{ matrix.python-version }}
+        run: uv venv --python ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv pip install -e ".[dev]" --system
+        run: uv pip install -e ".[dev]"
 
       - name: Lint
-        run: ruff check src/
+        run: uv run ruff check src/
 
       - name: Type check
-        run: mypy src/dkmio/
+        run: uv run mypy src/dkmio/
 
       - name: Tests
-        run: pytest --cov=dkmio
+        run: uv run pytest --cov=dkmio

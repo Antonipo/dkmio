@@ -14,13 +14,13 @@ jobs:
       - uses: astral-sh/setup-uv@v4
 
       - name: Set up Python
-        run: uv python install 3.12
+        run: uv venv --python 3.12
 
       - name: Build
-        run: uvx --from build pyproject-build
+        run: uv run --from build pyproject-build
 
       - name: Publish
-        run: uvx twine upload dist/*
+        run: uv run twine upload dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
