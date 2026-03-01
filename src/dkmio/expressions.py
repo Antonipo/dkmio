@@ -205,14 +205,20 @@ class ExpressionBuilder:
     def _build_single_condition(self, attr: str, op: str, value: Any) -> str:
         """Build a single condition expression."""
         # Handle size modifier: size__gt, size__lt, etc.
+        # Operators valid with size(): only comparisons and between
+        _SIZE_VALID_OPS = {"eq", "neq", "gt", "gte", "lt", "lte", "between"}
+
         if op.startswith("size__"):
             real_op = op[len("size__"):]
-            if real_op not in _FILTER_OPERATORS:
-                raise ValidationError(f"Unknown operator after size: {real_op!r}")
+            if real_op not in _SIZE_VALID_OPS:
+                raise ValidationError(
+                    f"Operator {real_op!r} cannot be used with size. "
+                    f"Valid: {', '.join(sorted(_SIZE_VALID_OPS))}"
+                )
             name_escaped = self.add_name(attr)
             size_expr = f"size({name_escaped})"
             template = _FILTER_OPERATORS[real_op]
-            assert template is not None, f"Operator {real_op!r} cannot be used with size"
+            assert template is not None  # guaranteed by _SIZE_VALID_OPS check
             if real_op == "between":
                 v1 = self.add_value(value[0])
                 v2 = self.add_value(value[1])
@@ -225,12 +231,12 @@ class ExpressionBuilder:
 
         if op in ("exists", "not_exists"):
             template = _FILTER_OPERATORS[op]
-            assert template is not None
+            assert template is not None  # exists/not_exists always have templates
             return template.format(name=name_escaped)
 
         if op == "between":
             template = _FILTER_OPERATORS[op]
-            assert template is not None
+            assert template is not None  # "between" always has a template
             v1 = self.add_value(value[0])
             v2 = self.add_value(value[1])
             return template.format(name=name_escaped, value=v1, value2=v2)
@@ -240,7 +246,7 @@ class ExpressionBuilder:
             return f"{name_escaped} IN ({', '.join(placeholders)})"
 
         template = _FILTER_OPERATORS[op]
-        assert template is not None, f"Operator {op!r} has no template"
+        assert template is not None  # size/in handled above
         v = self.add_value(value)
         return template.format(name=name_escaped, value=v)
 

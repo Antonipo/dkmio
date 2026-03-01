@@ -441,6 +441,10 @@ Transaction operations (`tx.put`, `tx.update`, `tx.delete`) also support `condit
 
 All operations succeed or all fail. Supports up to 100 items across multiple tables.
 
+There are two ways to pass the `DynamoDB` instance to transactions:
+
+**Option 1: Explicit `db=` on each call (always works, no setup needed)**
+
 ```python
 from dkmio import transaction
 
@@ -451,6 +455,25 @@ with transaction.write(db=db) as tx:
 
     # condition_check -- validates a condition without modifying the item
     tx.condition_check(users, user_id="usr_1", condition={"status__eq": "ACTIVE"})
+
+    # condition_check also supports condition_or
+    tx.condition_check(users, user_id="usr_1",
+                       condition_or=[{"status__eq": "ACTIVE"}, {"status__eq": "VIP"}])
+```
+
+**Option 2: `set_default()` once, then omit `db=`**
+
+If you use transactions frequently, call `set_default()` once at startup. This only affects `transaction.write()` and `transaction.read()` -- all other operations (`get`, `query`, `put`, etc.) work through `db.Table` and never need it.
+
+```python
+db = DynamoDB(region_name="us-east-1")
+db.set_default()  # register as default for transactions
+
+with transaction.write() as tx:    # no db= needed
+    tx.put(orders, user_id="usr_1", order_id="ord_1", total=100)
+
+with transaction.read() as tx:     # no db= needed
+    tx.get(orders, user_id="usr_1", order_id="ord_1")
 ```
 
 Transaction operations support conditions:
@@ -550,7 +573,6 @@ Used in `.filter()`, `condition=`, and `condition_or=`. Syntax: `attribute__oper
 | `exists` | `attribute_exists(attr)` | `email__exists=True` |
 | `not_exists` | `attribute_not_exists(attr)` | `email__not_exists=True` |
 | `in` | `attr IN (:a, :b, ...)` | `status__in=["PENDING", "DRAFT"]` |
-| `begins_with` | `begins_with(attr, :val)` | `name__begins_with="John"` |
 | `not_begins_with` | `NOT begins_with(attr, :val)` | `name__not_begins_with="test_"` |
 | `type` | `attribute_type(attr, :val)` | `data__type="M"` |
 | `size` | `size(attr) <op> :val` | `items__size__gt=0` |
@@ -663,7 +685,81 @@ The connection is lazy -- the boto3 resource is not created until the first oper
 
 ## Framework integration
 
-dkmio is framework-agnostic. Instantiate `DynamoDB` wherever your framework manages configuration, then define your tables using `db.Table` as the base class.
+dkmio is framework-agnostic. There are two ways to bind a DynamoDB connection to your tables:
+
+| Pattern | When to use |
+|---|---|
+| `db.Table` (recommended) | New projects, or when you want dkmio to manage the connection |
+| `Table(resource=)` | Existing projects that already have a `boto3.resource` |
+
+### Flask — existing project with boto3
+
+If your Flask app already creates a `boto3.resource("dynamodb")`, you can pass it directly when instantiating the table:
+
+**Option A: `DynamoDB(resource=)` wrapper**
+
+```python
+# extensions.py
+from dkmio import DynamoDB, PK, SK
+
+db = DynamoDB()
+
+class Usuarios(db.Table):
+    __table_name__ = "Usuarios"
+    pk = PK("id")
+
+# app.py
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    db._resource = boto3.resource("dynamodb", region_name=app.config["AWS_REGION"])
+    db.set_default()  # enables transaction.write() without db=
+    return app
+```
+
+**Option B: `Table(resource=)` direct**
+
+```python
+# models.py
+from dkmio import PK, SK
+from dkmio.table import Table
+
+class Usuarios(Table):
+    __table_name__ = "Usuarios"
+    pk = PK("id")
+
+# views.py
+from flask import current_app
+
+def get_user(user_id):
+    usuarios = Usuarios(resource=current_app.dynamodb)
+    return usuarios.get(id=user_id)
+```
+
+### Flask — new project using dkmio's DynamoDB
+
+Let dkmio manage the connection entirely:
+
+```python
+# extensions.py
+from dkmio import DynamoDB, PK, SK
+
+db = DynamoDB()
+
+class Usuarios(db.Table):
+    __table_name__ = "Usuarios"
+    pk = PK("id")
+
+# app.py
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    db._resource = boto3.resource("dynamodb", region_name=app.config["AWS_REGION"])
+    db.set_default()
+    return app
+```
 
 ### FastAPI
 
@@ -683,29 +779,6 @@ app = FastAPI()
 @app.get("/orders/{user_id}")
 def get_orders(user_id: str):
     return list(Orders().query(user_id=user_id))
-```
-
-### Flask
-
-```python
-# extensions.py
-from dkmio import DynamoDB, PK, SK
-
-db = DynamoDB()
-
-class Orders(db.Table):
-    __table_name__ = "orders"
-    pk = PK("user_id")
-    sk = SK("order_id")
-
-# app.py
-import boto3
-from flask import Flask
-
-def create_app():
-    app = Flask(__name__)
-    db._resource = boto3.resource("dynamodb", region_name=app.config["AWS_REGION"])
-    return app
 ```
 
 ### Django
@@ -743,6 +816,24 @@ class Orders(db.Table):
     sk = SK("order_id")
 
 orders = Orders()
+order = orders.get(user_id="usr_123", order_id="ord_456")
+```
+
+### Standalone with existing resource
+
+```python
+import boto3
+from dkmio import PK, SK
+from dkmio.table import Table
+
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+
+class Orders(Table):
+    __table_name__ = "orders"
+    pk = PK("user_id")
+    sk = SK("order_id")
+
+orders = Orders(resource=dynamodb)
 order = orders.get(user_id="usr_123", order_id="ord_456")
 ```
 

@@ -1,9 +1,10 @@
 """Tests for DynamoDB client."""
 
 import boto3
+import pytest
 from moto import mock_aws
 
-from dkmio import DynamoDB
+from dkmio import DynamoDB, PK, SK, transaction
 
 
 class TestDynamoDB:
@@ -49,8 +50,6 @@ class TestDynamoDB:
 
     @mock_aws
     def test_isinstance_with_bound_table(self, aws_credentials):
-        from dkmio import PK
-
         db = DynamoDB(region_name="us-east-1")
 
         class MyTable(db.Table):
@@ -60,3 +59,46 @@ class TestDynamoDB:
         instance = MyTable()
         assert isinstance(instance, db.Table)
 
+    @mock_aws
+    def test_set_default_binds_transaction(self, aws_credentials):
+        """set_default enables transaction.write()/read() without db=."""
+        resource = boto3.resource("dynamodb", region_name="us-east-1")
+        resource.create_table(
+            TableName="orders",
+            KeySchema=[
+                {"AttributeName": "user_id", "KeyType": "HASH"},
+                {"AttributeName": "order_id", "KeyType": "RANGE"},
+            ],
+            AttributeDefinitions=[
+                {"AttributeName": "user_id", "AttributeType": "S"},
+                {"AttributeName": "order_id", "AttributeType": "S"},
+            ],
+            BillingMode="PAY_PER_REQUEST",
+        )
+
+        db = DynamoDB(resource=resource)
+        db.set_default()
+
+        class Orders(db.Table):
+            __table_name__ = "orders"
+            pk = PK("user_id")
+            sk = SK("order_id")
+
+        orders = Orders()
+
+        # transaction.write() without db= should work after set_default()
+        with transaction.write() as tx:
+            tx.put(orders, user_id="usr_1", order_id="ord_1", status="NEW")
+
+        item = orders.get(user_id="usr_1", order_id="ord_1")
+        assert item is not None
+        assert item["status"] == "NEW"
+
+        # transaction.read() without db= should also work
+        with transaction.read() as tx:
+            tx.get(orders, user_id="usr_1", order_id="ord_1")
+
+        assert len(tx) == 1
+
+        # Clean up: unbind to not affect other tests
+        transaction._bind(None)

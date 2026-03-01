@@ -188,6 +188,42 @@ class TestConditionalTransactions:
             with transaction.write(db=db) as tx:
                 tx.condition_check(users, user_id="usr_1")
 
+    def test_condition_check_with_condition_or(self, setup):
+        """Condition_check should accept condition_or."""
+        db, orders, users = setup
+        users.put(user_id="usr_1", status="ACTIVE")
+
+        with transaction.write(db=db) as tx:
+            tx.put(orders, user_id="usr_1", order_id="ord_1", total=100)
+            tx.condition_check(
+                users,
+                user_id="usr_1",
+                condition_or=[
+                    {"status__eq": "ACTIVE"},
+                    {"status__eq": "VIP"},
+                ],
+            )
+
+        order = orders.get(user_id="usr_1", order_id="ord_1")
+        assert order is not None
+
+    def test_condition_check_condition_or_only(self, setup):
+        """Condition_check works with only condition_or (no condition)."""
+        db, orders, users = setup
+        users.put(user_id="usr_1", status="BLOCKED")
+
+        with pytest.raises(TransactionError):
+            with transaction.write(db=db) as tx:
+                tx.put(orders, user_id="usr_1", order_id="ord_1", total=100)
+                tx.condition_check(
+                    users,
+                    user_id="usr_1",
+                    condition_or=[
+                        {"status__eq": "ACTIVE"},
+                        {"status__eq": "VIP"},
+                    ],
+                )
+
     def test_update_with_condition_or(self, setup):
         db, orders, users = setup
         orders.put(user_id="usr_1", order_id="ord_1", status="DRAFT")

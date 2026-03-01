@@ -9,7 +9,7 @@ from botocore.exceptions import ClientError
 
 from ._types import TableProtocol
 from .exceptions import InvalidProjectionError, ValidationError
-from .expressions import ExpressionBuilder
+from .expressions import _SK_OPERATORS, ExpressionBuilder
 from .fields import Index, SKCondition
 from .operations import map_boto3_error
 from .pagination import QueryResult
@@ -61,6 +61,11 @@ class QueryBuilder:
             if len(kwargs) != 1:
                 raise ValidationError("where() accepts exactly one sort key condition")
             op, value = next(iter(kwargs.items()))
+            if op not in _SK_OPERATORS:
+                raise ValidationError(
+                    f"Invalid sort key operator: {op!r}. "
+                    f"Valid: {', '.join(sorted(_SK_OPERATORS))}"
+                )
             if op == "between":
                 if not isinstance(value, (list, tuple)) or len(value) != 2:
                     raise ValidationError("between requires a list/tuple of [low, high]")
@@ -70,7 +75,17 @@ class QueryBuilder:
         return self
 
     def filter(self, **kwargs: Any) -> QueryBuilder:
-        """Add filter conditions (FilterExpression)."""
+        """Add filter conditions (FilterExpression).
+
+        Duplicate keys across chained calls raise ValidationError
+        to prevent silent overwrites.
+        """
+        dupes = set(kwargs) & set(self._filters)
+        if dupes:
+            raise ValidationError(
+                f"Duplicate filter key(s): {', '.join(sorted(dupes))}. "
+                f"Each condition key can only be specified once."
+            )
         self._filters.update(kwargs)
         return self
 
@@ -97,6 +112,11 @@ class QueryBuilder:
 
     def consistent(self) -> QueryBuilder:
         """Use strongly consistent reads."""
+        if self._index is not None:
+            raise ValidationError(
+                "ConsistentRead is not supported on Global Secondary Indexes. "
+                f"Index: '{self._index.index_name}'"
+            )
         self._consistent = True
         return self
 
@@ -190,7 +210,7 @@ class QueryBuilder:
 
         return QueryResult(
             items=normalize_items(all_items),
-            last_key=last_key if max_items and len(all_items) >= max_items else None,
+            last_key=last_key if max_items is not None and len(all_items) >= max_items else None,
             count=len(all_items),
             scanned_count=total_scanned,
         )

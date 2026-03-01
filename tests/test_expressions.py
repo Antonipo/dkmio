@@ -200,6 +200,24 @@ class TestBuildFilter:
         expr = b.build_filter({"items__size__eq": 0})
         assert "size(#items) = :v0" in expr
 
+    def test_size_in_raises_validation_error(self):
+        """Size__in should raise ValidationError, not AssertionError."""
+        b = ExpressionBuilder()
+        with pytest.raises(ValidationError, match="cannot be used with size"):
+            b.build_filter({"items__size__in": [1, 2]})
+
+    def test_size_exists_raises_validation_error(self):
+        """Size__exists should raise ValidationError, not AssertionError."""
+        b = ExpressionBuilder()
+        with pytest.raises(ValidationError, match="cannot be used with size"):
+            b.build_filter({"items__size__exists": True})
+
+    def test_size_not_exists_raises_validation_error(self):
+        """Size__not_exists should raise ValidationError."""
+        b = ExpressionBuilder()
+        with pytest.raises(ValidationError, match="cannot be used with size"):
+            b.build_filter({"items__size__not_exists": True})
+
     def test_nested_path(self):
         b = ExpressionBuilder()
         expr = b.build_filter({"address.city__eq": "Lima"})
