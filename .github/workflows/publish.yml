@@ -17,10 +17,10 @@ jobs:
         run: uv venv --python 3.12
 
       - name: Build
-        run: uv run --from build pyproject-build
+        run: uvx --from build pyproject-build
 
       - name: Publish
-        run: uv run twine upload dist/*
+        run: uvx twine upload dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}

@@ -17,7 +17,7 @@ from .exceptions import (
     ValidationError,
 )
 from .expressions import ExpressionBuilder
-from .serialize import normalize_item, normalize_items
+from .serialize import normalize_item
 
 logger = logging.getLogger("dkmio")
 
