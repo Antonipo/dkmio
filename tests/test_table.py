@@ -232,6 +232,35 @@ class TestIndexAccessorErrors:
             orders.by_status.query(status="NEW", extra="bad")
 
 
+class TestTableDirectResource:
+    @mock_aws
+    def test_table_with_resource_direct(self, dynamodb, users_table):
+        class Users(Table):
+            __table_name__ = "users"
+            pk = PK("user_id")
+
+        users = Users(resource=dynamodb)
+        users.put(user_id="usr_1", name="Alice")
+        result = users.get(user_id="usr_1")
+        assert result is not None
+        assert result["name"] == "Alice"
+
+    @mock_aws
+    def test_table_resource_overrides_class_db(self, dynamodb, users_table):
+        db = DynamoDB(resource=dynamodb)
+
+        class Users(db.Table):
+            __table_name__ = "users"
+            pk = PK("user_id")
+
+        # Instance resource should override class-level _db
+        users = Users(resource=dynamodb)
+        users.put(user_id="usr_1", name="Bob")
+        result = users.get(user_id="usr_1")
+        assert result is not None
+        assert result["name"] == "Bob"
+
+
 class TestGetErrorHandling:
     def test_get_nonexistent_table_raises_table_not_found(self, dynamodb):
         db = DynamoDB(resource=dynamodb)

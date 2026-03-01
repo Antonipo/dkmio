@@ -218,6 +218,7 @@ class ExpressionBuilder:
             name_escaped = self.add_name(attr)
             size_expr = f"size({name_escaped})"
             template = _FILTER_OPERATORS[real_op]
+            assert template is not None  # guaranteed by _SIZE_VALID_OPS check
             if real_op == "between":
                 v1 = self.add_value(value[0])
                 v2 = self.add_value(value[1])
@@ -230,10 +231,12 @@ class ExpressionBuilder:
 
         if op in ("exists", "not_exists"):
             template = _FILTER_OPERATORS[op]
+            assert template is not None  # exists/not_exists always have templates
             return template.format(name=name_escaped)
 
         if op == "between":
             template = _FILTER_OPERATORS[op]
+            assert template is not None  # "between" always has a template
             v1 = self.add_value(value[0])
             v2 = self.add_value(value[1])
             return template.format(name=name_escaped, value=v1, value2=v2)
@@ -243,6 +246,7 @@ class ExpressionBuilder:
             return f"{name_escaped} IN ({', '.join(placeholders)})"
 
         template = _FILTER_OPERATORS[op]
+        assert template is not None  # size/in handled above
         v = self.add_value(value)
         return template.format(name=name_escaped, value=v)
 

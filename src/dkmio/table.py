@@ -151,11 +151,15 @@ class Table(metaclass=TableMeta):
     _indexes: dict[str, Index] = {}
     _ttl: TTL | None = None
 
-    def __init__(self) -> None:
+    def __init__(self, resource=None) -> None:
         if not self.__table_name__:
             raise ValidationError(
                 f"{self.__class__.__name__} must define __table_name__"
             )
+        if resource is not None:
+            from .client import DynamoDB
+
+            self._db = DynamoDB(resource=resource)
 
     @property
     def _dynamo_table(self) -> Any:

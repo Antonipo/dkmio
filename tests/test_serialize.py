@@ -1,4 +1,4 @@
-"""Tests for DynamoDB type normalization (BUG-001)."""
+"""Tests for DynamoDB type normalization."""
 
 import json
 from decimal import Decimal
@@ -111,7 +111,7 @@ class TestNormalizeItem:
         assert result["metadata"] is None
 
     def test_json_serializable(self):
-        """The whole point of BUG-001: items must be JSON serializable."""
+        """Items must be JSON serializable."""
         raw = {
             "id": "test",
             "count": Decimal("42"),
