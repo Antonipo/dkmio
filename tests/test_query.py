@@ -3,7 +3,7 @@
 import pytest
 
 from dkmio import PK, SK, DynamoDB, Index
-from dkmio.exceptions import InvalidProjectionError, TableNotFoundError
+from dkmio.exceptions import InvalidProjectionError, TableNotFoundError, ValidationError
 from dkmio.pagination import QueryResult
 
 
@@ -234,6 +234,13 @@ class TestFetchAll:
         result = orders.scan().fetch_all()
         assert len(result) == 4
 
+    def test_fetch_all_max_items_zero(self, setup):
+        """Max_items=0 should return empty items but preserve last_key."""
+        orders, _ = setup
+        result = orders.query(user_id="usr_1").fetch_all(max_items=0)
+        assert len(result) == 0
+        assert result.items == []
+
 
 class TestCount:
     def test_query_count(self, setup):
@@ -335,3 +342,70 @@ class TestQueryErrorHandling:
         inst = Nonexistent()
         with pytest.raises(TableNotFoundError):
             inst.query(id="123").count()
+
+
+class TestWhereValidation:
+    """Where() kwargs should validate SK operators early."""
+
+    def test_where_invalid_operator_raises(self, setup):
+        orders, _ = setup
+        with pytest.raises(ValidationError, match="Invalid sort key operator"):
+            orders.query(user_id="usr_1").where(contains="foo")
+
+    def test_where_not_exists_raises(self, setup):
+        orders, _ = setup
+        with pytest.raises(ValidationError, match="Invalid sort key operator"):
+            orders.query(user_id="usr_1").where(not_exists=True)
+
+    def test_where_valid_operators_pass(self, setup):
+        orders, _ = setup
+        # These should not raise
+        orders.query(user_id="usr_1").where(eq="ord_1")
+        orders.query(user_id="usr_1").where(gte="ord_1")
+        orders.query(user_id="usr_1").where(begins_with="ord_")
+        orders.query(user_id="usr_1").where(between=["a", "z"])
+
+
+class TestConsistentOnIndex:
+    """.consistent() on GSI should raise ValidationError."""
+
+    def test_consistent_on_gsi_raises(self, setup):
+        orders, Orders = setup
+        with pytest.raises(ValidationError, match="not supported on Global Secondary"):
+            orders.by_status.query(status="PENDING").consistent()
+
+    def test_consistent_on_table_query_ok(self, setup):
+        orders, _ = setup
+        # Table query — should work fine
+        result = orders.query(user_id="usr_1").consistent().execute()
+        assert len(result) == 3
+
+    def test_consistent_on_scan_ok(self, setup):
+        orders, _ = setup
+        # Scan on base table — should work fine
+        result = orders.scan().consistent().execute()
+        assert len(result) == 4
+
+
+class TestFilterDuplicateKeys:
+    """Chained .filter() with same key should raise, not overwrite."""
+
+    def test_duplicate_filter_key_raises(self, setup):
+        orders, _ = setup
+        with pytest.raises(ValidationError, match="Duplicate filter key"):
+            (
+                orders.query(user_id="usr_1")
+                .filter(status__eq="PENDING")
+                .filter(status__eq="SHIPPED")
+            )
+
+    def test_different_filter_keys_ok(self, setup):
+        orders, _ = setup
+        # Different keys — should work fine
+        result = (
+            orders.query(user_id="usr_1")
+            .filter(status__eq="PENDING")
+            .filter(total__gte=50)
+            .execute()
+        )
+        assert len(result) == 2

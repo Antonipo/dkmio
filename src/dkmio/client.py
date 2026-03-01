@@ -58,6 +58,16 @@ class DynamoDB:
         self._resource = boto3.resource("dynamodb", **kwargs)
         return self._resource
 
+    def set_default(self) -> None:
+        """Register this instance as the default for module-level APIs.
+
+        After calling this, ``transaction.write()`` and ``transaction.read()``
+        work without passing ``db=``.
+        """
+        from .transactions import transaction
+
+        transaction._bind(self)
+
     @property
     def Table(self) -> type:
         """Return a Table base class bound to this DynamoDB instance."""

@@ -146,8 +146,11 @@ class WriteTransaction:
         """Add a ConditionCheck to the transaction (validates without modifying)."""
         logger.debug("tx add condition_check on %s", table.__table_name__)
         condition = kwargs.pop("condition", None)
-        if not condition:
-            raise ValidationError("condition_check() requires a 'condition' argument")
+        condition_or = kwargs.pop("condition_or", None)
+        if not condition and not condition_or:
+            raise ValidationError(
+                "condition_check() requires a 'condition' or 'condition_or' argument"
+            )
 
         keys, extra = table._extract_keys(kwargs)
         table._validate_full_key(keys, "condition_check")
@@ -158,7 +161,7 @@ class WriteTransaction:
             )
 
         builder = ExpressionBuilder()
-        cond_expr = parse_conditions(builder, condition)
+        cond_expr = parse_conditions(builder, condition, condition_or)
 
         item: dict[str, Any] = {
             "ConditionCheck": {
