@@ -1,6 +1,6 @@
 """dkmio — Efficient OKM for AWS DynamoDB."""
 
-__version__ = "0.6.0"
+__version__ = "0.6.1"
 
 from ._types import TableProtocol
 from .client import DynamoDB

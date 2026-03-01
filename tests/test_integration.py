@@ -383,7 +383,7 @@ class TestDesignDocExamples:
         order = orders.get(user_id="usr_123", order_id="ord_456")
         assert order["total"] == 250
         assert order["is_active"] is True
-        assert isinstance(order["tags"], set)
+        assert isinstance(order["tags"], list)
         assert "urgent" in order["tags"]
         assert isinstance(order["items"], list)
         assert order["items"][0]["product"] == "keyboard"

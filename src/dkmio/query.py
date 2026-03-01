@@ -13,6 +13,7 @@ from .expressions import ExpressionBuilder
 from .fields import Index, SKCondition
 from .operations import map_boto3_error
 from .pagination import QueryResult
+from .serialize import normalize_items
 
 logger = logging.getLogger("dkmio")
 
@@ -142,7 +143,7 @@ class QueryBuilder:
             raise map_boto3_error(e) from e
 
         self._result = QueryResult(
-            items=response.get("Items", []),
+            items=normalize_items(response.get("Items", [])),
             last_key=response.get("LastEvaluatedKey"),
             count=response.get("Count", 0),
             scanned_count=response.get("ScannedCount", 0),
@@ -188,7 +189,7 @@ class QueryBuilder:
             params["ExclusiveStartKey"] = last_key
 
         return QueryResult(
-            items=all_items,
+            items=normalize_items(all_items),
             last_key=last_key if max_items and len(all_items) >= max_items else None,
             count=len(all_items),
             scanned_count=total_scanned,

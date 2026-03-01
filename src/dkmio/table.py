@@ -7,6 +7,7 @@ from typing import Any
 
 from .exceptions import MissingKeyError, ValidationError
 from .fields import LSI, PK, SK, TTL, Index
+from .serialize import normalize_item
 
 logger = logging.getLogger("dkmio")
 
@@ -252,8 +253,8 @@ class Table(metaclass=TableMeta):
             response = self._dynamo_table.get_item(**params)
         except ClientError as e:
             raise map_boto3_error(e) from e
-        result: dict[str, Any] | None = response.get("Item")
-        return result
+        raw: dict[str, Any] | None = response.get("Item")
+        return normalize_item(raw) if raw is not None else None
 
     def query(self, **kwargs: Any):
         """Start a Query operation on the table's primary key."""

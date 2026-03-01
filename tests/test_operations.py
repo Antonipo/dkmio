@@ -227,7 +227,7 @@ class TestBatchWrite:
 
         item = orders.get(user_id="usr_1", order_id="ord_1")
         assert item is not None
-        assert item["total"] == Decimal("99.99")
+        assert item["total"] == 99.99
         assert "urgent" in item["tags"]
         assert item["address"]["city"] == "Lima"
         assert item["items"][0]["product"] == "keyboard"

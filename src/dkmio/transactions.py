@@ -16,6 +16,7 @@ from .conditions import parse_conditions
 from .exceptions import TransactionError, ValidationError
 from .expressions import ExpressionBuilder
 from .operations import map_boto3_error
+from .serialize import normalize_item
 
 logger = logging.getLogger("dkmio")
 
@@ -256,7 +257,7 @@ class ReadTransaction:
         for resp in response.get("Responses", []):
             item = resp.get("Item")
             if item:
-                self._results.append(item)
+                self._results.append(normalize_item(item))
             else:
                 self._results.append(None)
 

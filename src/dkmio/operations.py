@@ -17,6 +17,7 @@ from .exceptions import (
     ValidationError,
 )
 from .expressions import ExpressionBuilder
+from .serialize import normalize_item, normalize_items
 
 logger = logging.getLogger("dkmio")
 
@@ -76,8 +77,8 @@ def execute_put(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, Any] 
         raise map_boto3_error(e) from e
 
     if return_values:
-        result: dict[str, Any] | None = response.get("Attributes")
-        return result
+        raw = response.get("Attributes")
+        return normalize_item(raw) if raw is not None else None
     return None
 
 
@@ -143,8 +144,8 @@ def execute_update(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, An
         raise map_boto3_error(e) from e
 
     if return_values:
-        result: dict[str, Any] | None = response.get("Attributes")
-        return result
+        raw = response.get("Attributes")
+        return normalize_item(raw) if raw is not None else None
     return None
 
 
@@ -188,8 +189,8 @@ def execute_delete(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, An
         raise map_boto3_error(e) from e
 
     if return_values:
-        result: dict[str, Any] | None = response.get("Attributes")
-        return result
+        raw = response.get("Attributes")
+        return normalize_item(raw) if raw is not None else None
     return None
 
 
@@ -284,7 +285,7 @@ def execute_batch_read(
 
     result_map: dict[tuple, dict[str, Any]] = {}
     for item in all_results:
-        result_map[_make_key_tuple(item)] = item
+        result_map[_make_key_tuple(item)] = normalize_item(item)
 
     # Return in input order
     ordered: list[dict[str, Any] | None] = []
