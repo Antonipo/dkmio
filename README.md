@@ -694,71 +694,131 @@ dkmio is framework-agnostic. There are two ways to bind a DynamoDB connection to
 
 ### Flask — existing project with boto3
 
-If your Flask app already creates a `boto3.resource("dynamodb")`, you can pass it directly when instantiating the table:
+If your Flask app already uses boto3 directly:
+
+```python
+from flask import Flask
+import boto3
+
+app = Flask(__name__)
+
+# Conexión
+dynamodb = boto3.resource(
+    service_name='dynamodb',
+    aws_access_key_id="aaabbb",
+    aws_secret_access_key='cccccdddd',
+    region_name='us-east-1'
+)
+table = dynamodb.Table('Usuarios')
+
+@app.route('/usuario/<user_id>')
+def get_user(user_id):
+    response = table.get_item(Key={'id': user_id})
+    return response.get('Item', {})
+```
+
+You can add dkmio without changing your connection setup:
 
 **Option A: `DynamoDB(resource=)` wrapper**
 
 ```python
-# extensions.py
-from dkmio import DynamoDB, PK, SK
+from flask import Flask
+import boto3
+from dkmio import DynamoDB, PK
 
-db = DynamoDB()
+app = Flask(__name__)
+
+dynamodb = boto3.resource(
+    service_name='dynamodb',
+    aws_access_key_id="aaabbb",
+    aws_secret_access_key='cccccdddd',
+    region_name='us-east-1'
+)
+
+db = DynamoDB(resource=dynamodb)
 
 class Usuarios(db.Table):
     __table_name__ = "Usuarios"
     pk = PK("id")
 
-# app.py
-from flask import Flask
-
-def create_app():
-    app = Flask(__name__)
-    db._resource = boto3.resource("dynamodb", region_name=app.config["AWS_REGION"])
-    db.set_default()  # enables transaction.write() without db=
-    return app
+@app.route('/usuario/<user_id>')
+def get_user(user_id):
+    usuarios = Usuarios()
+    return usuarios.get(id=user_id) or {}
 ```
 
 **Option B: `Table(resource=)` direct**
 
 ```python
-# models.py
-from dkmio import PK, SK
+from flask import Flask
+import boto3
+from dkmio import PK
 from dkmio.table import Table
+
+app = Flask(__name__)
+
+dynamodb = boto3.resource(
+    service_name='dynamodb',
+    aws_access_key_id="aaabbb",
+    aws_secret_access_key='cccccdddd',
+    region_name='us-east-1'
+)
 
 class Usuarios(Table):
     __table_name__ = "Usuarios"
     pk = PK("id")
 
-# views.py
-from flask import current_app
-
+@app.route('/usuario/<user_id>')
 def get_user(user_id):
-    usuarios = Usuarios(resource=current_app.dynamodb)
-    return usuarios.get(id=user_id)
+    usuarios = Usuarios(resource=dynamodb)
+    return usuarios.get(id=user_id) or {}
 ```
 
 ### Flask — new project using dkmio's DynamoDB
 
 Let dkmio manage the connection entirely:
 
-```python
-# extensions.py
-from dkmio import DynamoDB, PK, SK
+**Option A: `db.Table` wrapper**
 
-db = DynamoDB()
+```python
+from flask import Flask
+from dkmio import DynamoDB, PK
+
+app = Flask(__name__)
+
+db = DynamoDB(region_name="us-east-1")
 
 class Usuarios(db.Table):
     __table_name__ = "Usuarios"
     pk = PK("id")
 
-# app.py
-from flask import Flask
+usuarios = Usuarios()
 
-def create_app():
-    app = Flask(__name__)
-    db._resource = boto3.resource("dynamodb", region_name=app.config["AWS_REGION"])
-    db.set_default()
-    return app
+@app.route('/usuario/<user_id>')
+def get_user(user_id):
+    return usuarios.get(id=user_id) or {}
+```
+
+**Option B: `Table(resource=)` direct**
+
+```python
+import boto3
+from flask import Flask
+from dkmio import PK
+from dkmio.table import Table
+
+app = Flask(__name__)
+
+dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
+
+class Usuarios(Table):
+    __table_name__ = "Usuarios"
+    pk = PK("id")
+
+@app.route('/usuario/<user_id>')
+def get_user(user_id):
+    usuarios = Usuarios(resource=dynamodb)
+    return usuarios.get(id=user_id) or {}
 ```
 
 ### FastAPI
