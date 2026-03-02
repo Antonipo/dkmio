@@ -1,4 +1,12 @@
-"""Write operations: put, update, delete, batch write."""
+"""Write operations for DynamoDB: put, update, delete, and batch write.
+
+This module contains the low-level execution functions for DynamoDB write
+operations. Each function accepts a :class:`~dkmio._types.TableProtocol`
+instance and a kwargs dict, builds the appropriate DynamoDB API parameters,
+and handles error mapping to dkmio exceptions.
+
+These functions are called internally by :class:`~dkmio.table.Table` methods.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +31,25 @@ logger = logging.getLogger("dkmio")
 
 
 def map_boto3_error(e: Any) -> DkmioError:
-    """Map a boto3 ClientError to an OKM exception."""
+    """Map a boto3 ``ClientError`` to a dkmio exception.
+
+    Inspects ``e.response["Error"]["Code"]`` and returns the
+    appropriate :class:`~dkmio.exceptions.DkmioError` subclass:
+
+    - ``ConditionalCheckFailedException`` -> :class:`ConditionError`
+    - ``ResourceNotFoundException`` -> :class:`TableNotFoundError`
+    - ``ProvisionedThroughputExceededException`` / ``ThrottlingException``
+      -> :class:`ThrottlingError`
+    - ``ItemCollectionSizeLimitExceededException`` -> :class:`CollectionSizeError`
+    - ``ValidationException`` -> :class:`ValidationError`
+    - Any other code -> :class:`DkmioError`
+
+    Args:
+        e: A ``botocore.exceptions.ClientError`` instance.
+
+    Returns:
+        The corresponding dkmio exception (not raised, just returned).
+    """
     error_code = e.response["Error"]["Code"]
     message = e.response["Error"].get("Message", str(e))
 
@@ -45,7 +71,27 @@ def map_boto3_error(e: Any) -> DkmioError:
 
 
 def execute_put(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, Any] | None:
-    """Execute a PutItem operation."""
+    """Execute a DynamoDB ``PutItem`` operation.
+
+    Supports conditional writes via ``condition`` / ``condition_or``
+    kwargs, and returning old values via ``return_values``.
+
+    Args:
+        table: The table instance to write to.
+        kwargs: Item attributes plus optional special keys:
+            - ``condition`` (dict): AND-joined condition expression.
+            - ``condition_or`` (list[dict]): OR-joined condition groups.
+            - ``return_values`` (str): DynamoDB ``ReturnValues`` option
+              (e.g. ``"ALL_OLD"``).
+
+    Returns:
+        The previous item attributes if ``return_values`` was specified
+        and the item existed, otherwise ``None``.
+
+    Raises:
+        ConditionError: If the condition expression evaluates to false.
+        TableNotFoundError: If the table does not exist.
+    """
     from botocore.exceptions import ClientError
 
     # Extract condition, condition_or, return_values
@@ -83,7 +129,32 @@ def execute_put(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, Any] 
 
 
 def execute_update(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, Any] | None:
-    """Execute an UpdateItem operation."""
+    """Execute a DynamoDB ``UpdateItem`` operation.
+
+    Builds an ``UpdateExpression`` from the provided update operations
+    (``set``, ``remove``, ``append``, ``add``, ``delete``) and applies
+    it to the item identified by the key attributes in *kwargs*.
+
+    Args:
+        table: The table instance to update on.
+        kwargs: Must include the full primary key, plus at least one of:
+            - ``set`` (dict): Attributes to set (``SET`` action).
+            - ``remove`` (list[str]): Attributes to remove (``REMOVE``).
+            - ``append`` (dict): Values to append to lists (``SET list_append``).
+            - ``add`` (dict): Values to add to numbers/sets (``ADD``).
+            - ``delete`` (dict): Values to delete from sets (``DELETE``).
+            - ``condition`` (dict): AND-joined condition expression.
+            - ``condition_or`` (list[dict]): OR-joined condition groups.
+            - ``return_values`` (str): DynamoDB ``ReturnValues`` option.
+
+    Returns:
+        The item attributes if ``return_values`` was specified, otherwise ``None``.
+
+    Raises:
+        MissingKeyError: If the full primary key is not provided.
+        ValidationError: If no update operation is specified or unexpected args are present.
+        ConditionError: If the condition expression evaluates to false.
+    """
     from botocore.exceptions import ClientError
 
     # Extract update operations
@@ -150,7 +221,25 @@ def execute_update(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, An
 
 
 def execute_delete(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, Any] | None:
-    """Execute a DeleteItem operation."""
+    """Execute a DynamoDB ``DeleteItem`` operation.
+
+    Args:
+        table: The table instance to delete from.
+        kwargs: Must include the full primary key, plus optional:
+            - ``condition`` (dict): AND-joined condition expression.
+            - ``condition_or`` (list[dict]): OR-joined condition groups.
+            - ``return_values`` (str): DynamoDB ``ReturnValues`` option
+              (e.g. ``"ALL_OLD"`` to get the deleted item).
+
+    Returns:
+        The deleted item's attributes if ``return_values`` was specified,
+        otherwise ``None``.
+
+    Raises:
+        MissingKeyError: If the full primary key is not provided.
+        ValidationError: If unexpected arguments are present.
+        ConditionError: If the condition expression evaluates to false.
+    """
     from botocore.exceptions import ClientError
 
     condition = kwargs.pop("condition", None)
@@ -296,9 +385,22 @@ def execute_batch_read(
 
 
 class BatchWriter:
-    """Context manager for batch write operations (up to 25 per batch).
+    """Context manager for batch write operations.
 
-    Automatically handles unprocessed items with retries.
+    Queues ``PutItem`` and ``DeleteItem`` requests, then flushes them
+    in chunks of 25 (the DynamoDB ``BatchWriteItem`` limit) when the
+    context manager exits. Automatically retries unprocessed items with
+    exponential backoff (up to 5 retries).
+
+    Example::
+
+        with orders.batch_write() as batch:
+            batch.put(user_id="u1", order_id="o1", total=10)
+            batch.put(user_id="u1", order_id="o2", total=20)
+            batch.delete(user_id="u1", order_id="o3")
+
+    Args:
+        table: The table instance this batch writer operates on.
     """
 
     def __init__(self, table: TableProtocol) -> None:
@@ -306,11 +408,23 @@ class BatchWriter:
         self._operations: list[dict[str, Any]] = []
 
     def put(self, **kwargs: Any) -> None:
-        """Queue a PutItem in the batch."""
+        """Queue a ``PutItem`` request in the batch.
+
+        Args:
+            **kwargs: The item attributes to put.
+        """
         self._operations.append({"PutRequest": {"Item": kwargs}})
 
     def delete(self, **kwargs: Any) -> None:
-        """Queue a DeleteItem in the batch."""
+        """Queue a ``DeleteItem`` request in the batch.
+
+        Args:
+            **kwargs: The key attributes (PK + SK) of the item to delete.
+
+        Raises:
+            MissingKeyError: If the full primary key is not provided.
+            ValidationError: If unexpected (non-key) arguments are present.
+        """
         keys, extra = self._table._extract_keys(kwargs)
         self._table._validate_full_key(keys, "delete")
         if extra:
@@ -320,9 +434,18 @@ class BatchWriter:
         self._operations.append({"DeleteRequest": {"Key": keys}})
 
     def __enter__(self) -> BatchWriter:
+        """Enter the context manager, returning self for chaining."""
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        """Flush all queued operations on successful exit.
+
+        If an exception occurred inside the ``with`` block, the batch
+        is abandoned (no writes are sent to DynamoDB).
+
+        Raises:
+            ThrottlingError: If unprocessed items remain after 5 retries.
+        """
         if exc_type is not None:
             return  # Don't execute on exception
 
