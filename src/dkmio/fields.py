@@ -1,4 +1,22 @@
-"""Field descriptors for DynamoDB table definitions."""
+"""Field descriptors for DynamoDB table definitions.
+
+This module provides the building blocks for declaring DynamoDB table
+schemas in Python classes:
+
+- :class:`PK` — partition key descriptor
+- :class:`SK` — sort key descriptor with comparison helpers
+- :class:`Index` / :class:`LSI` — secondary index descriptors
+- :class:`TTL` — time-to-live descriptor
+
+Example::
+
+    class Orders(db.Table):
+        __table_name__ = "orders"
+        pk = PK("user_id")
+        sk = SK("order_id")
+        by_status = Index("status-index", pk="status", sk="created_at")
+        expires = TTL("ttl")
+"""
 
 from __future__ import annotations
 
@@ -8,7 +26,20 @@ from typing import Any
 
 
 class PK:
-    """Partition key descriptor."""
+    """Partition key descriptor.
+
+    Declares which DynamoDB attribute serves as the partition key
+    for a table definition.
+
+    Args:
+        attribute_name: The DynamoDB attribute name for the partition key.
+
+    Example::
+
+        class Users(db.Table):
+            __table_name__ = "users"
+            pk = PK("user_id")
+    """
 
     def __init__(self, attribute_name: str) -> None:
         self.attribute_name = attribute_name
@@ -19,37 +50,70 @@ class PK:
 
 @dataclass
 class SKCondition:
-    """Condition on a sort key, produced by SK comparison methods."""
+    """Represents a condition on a sort key, produced by :class:`SK` comparison methods.
+
+    This is an internal data structure passed to
+    :meth:`~dkmio.expressions.ExpressionBuilder.build_key_condition`
+    to generate a ``KeyConditionExpression``.
+
+    Attributes:
+        operator: The comparison operator name (e.g. ``"eq"``, ``"begins_with"``).
+        values: Tuple of operand values for the condition.
+    """
 
     operator: str
     values: tuple[Any, ...]
 
 
 class SK:
-    """Sort key descriptor with comparison methods for KeyConditionExpression."""
+    """Sort key descriptor with comparison methods for ``KeyConditionExpression``.
+
+    Provides a fluent API for building sort key conditions used in
+    :meth:`~dkmio.query.QueryBuilder.where`.
+
+    Args:
+        attribute_name: The DynamoDB attribute name for the sort key.
+
+    Example::
+
+        class Orders(db.Table):
+            __table_name__ = "orders"
+            pk = PK("user_id")
+            sk = SK("order_id")
+
+        # Query with sort key condition
+        orders.query(user_id="u1").where(begins_with="ord_")
+    """
 
     def __init__(self, attribute_name: str) -> None:
         self.attribute_name = attribute_name
 
     def eq(self, value: Any) -> SKCondition:
+        """Sort key equals *value* (``sk = :v``)."""
         return SKCondition("eq", (value,))
 
     def gt(self, value: Any) -> SKCondition:
+        """Sort key greater than *value* (``sk > :v``)."""
         return SKCondition("gt", (value,))
 
     def gte(self, value: Any) -> SKCondition:
+        """Sort key greater than or equal to *value* (``sk >= :v``)."""
         return SKCondition("gte", (value,))
 
     def lt(self, value: Any) -> SKCondition:
+        """Sort key less than *value* (``sk < :v``)."""
         return SKCondition("lt", (value,))
 
     def lte(self, value: Any) -> SKCondition:
+        """Sort key less than or equal to *value* (``sk <= :v``)."""
         return SKCondition("lte", (value,))
 
     def between(self, low: Any, high: Any) -> SKCondition:
+        """Sort key between *low* and *high* inclusive (``sk BETWEEN :lo AND :hi``)."""
         return SKCondition("between", (low, high))
 
     def begins_with(self, prefix: Any) -> SKCondition:
+        """Sort key starts with *prefix* (``begins_with(sk, :prefix)``)."""
         return SKCondition("begins_with", (prefix,))
 
     def __repr__(self) -> str:
@@ -155,10 +219,24 @@ class LSI(Index):
 
 
 class TTL:
-    """TTL (Time To Live) descriptor.
+    """Time-To-Live descriptor for automatic item expiration.
+
+    Declares which DynamoDB attribute holds the TTL epoch timestamp.
+    Provides a convenience method :meth:`from_now` to compute future
+    expiration timestamps.
 
     Args:
-        attribute_name: The name of the TTL attribute in DynamoDB.
+        attribute_name: The DynamoDB attribute name for the TTL field.
+
+    Example::
+
+        class Sessions(db.Table):
+            __table_name__ = "sessions"
+            pk = PK("session_id")
+            expires = TTL("ttl")
+
+        sessions = Sessions()
+        sessions.put(session_id="s1", ttl=sessions.ttl.from_now(hours=2))
     """
 
     def __init__(self, attribute_name: str) -> None:
@@ -171,7 +249,22 @@ class TTL:
         minutes: int = 0,
         seconds: int = 0,
     ) -> int:
-        """Calculate an epoch timestamp from now + the given duration."""
+        """Calculate an epoch timestamp relative to the current time.
+
+        All duration parameters are cumulative. For example,
+        ``from_now(days=1, hours=6)`` returns a timestamp 30 hours
+        from now.
+
+        Args:
+            days: Number of days to add.
+            hours: Number of hours to add.
+            minutes: Number of minutes to add.
+            seconds: Number of seconds to add.
+
+        Returns:
+            Unix epoch timestamp (integer) representing the computed
+            future point in time.
+        """
         total_seconds = (
             days * 86400 + hours * 3600 + minutes * 60 + seconds
         )

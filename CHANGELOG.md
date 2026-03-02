@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1] - 2026-03-02
+
+### Added
+- Comprehensive docstrings on all public modules, classes, methods, and functions for better `help()` output, IDE tooltips, and Sphinx/autodoc support.
+
+---
+
 ## [0.7.0] - 2026-03-01
 
 ### Added

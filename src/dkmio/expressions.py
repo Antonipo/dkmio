@@ -1,7 +1,13 @@
 """Expression builder for DynamoDB operations.
 
-Generates KeyConditionExpression, FilterExpression, ProjectionExpression,
-UpdateExpression, and ConditionExpression with automatic attribute name escaping.
+Generates ``KeyConditionExpression``, ``FilterExpression``,
+``ProjectionExpression``, ``UpdateExpression``, and
+``ConditionExpression`` strings with automatic attribute-name escaping
+via ``ExpressionAttributeNames`` (``#name`` placeholders).
+
+This module is an internal implementation detail. Users interact with it
+indirectly through the fluent API (``query().where().filter().select()``),
+``put(condition=...)``, ``update(set=...)``, etc.
 """
 
 from __future__ import annotations
@@ -119,6 +125,11 @@ class ExpressionBuilder:
     """
 
     def __init__(self) -> None:
+        """Initialize a new builder with empty name/value registries.
+
+        Create a fresh ``ExpressionBuilder`` for each DynamoDB operation
+        to avoid placeholder collisions between unrelated expressions.
+        """
         self._names: dict[str, str] = {}
         self._values: dict[str, Any] = {}
         self._value_counter = 0
@@ -203,7 +214,27 @@ class ExpressionBuilder:
         return " AND ".join(parts)
 
     def _build_single_condition(self, attr: str, op: str, value: Any) -> str:
-        """Build a single condition expression."""
+        """Build a single condition expression clause.
+
+        Handles regular operators, ``size__<op>`` modifiers,
+        ``exists``/``not_exists`` (no value), ``between`` (two values),
+        and ``in`` (variable-length value list).
+
+        Args:
+            attr: The attribute path (e.g. ``"status"`` or ``"address.city"``).
+            op: The operator string (e.g. ``"eq"``, ``"size__gt"``, ``"in"``).
+            value: The comparison value(s). Type depends on operator:
+                - ``between``: sequence of ``[low, high]``
+                - ``in``: iterable of values
+                - ``exists``/``not_exists``: ignored
+                - all others: single scalar value.
+
+        Returns:
+            A DynamoDB expression fragment (e.g. ``"#status = :v0"``).
+
+        Raises:
+            ValidationError: If the operator is invalid for ``size``.
+        """
         # Handle size modifier: size__gt, size__lt, etc.
         # Operators valid with size(): only comparisons and between
         _SIZE_VALID_OPS = {"eq", "neq", "gt", "gte", "lt", "lte", "between"}

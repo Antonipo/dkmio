@@ -25,6 +25,22 @@ def normalize_item(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_value(value: Any) -> Any:
+    """Recursively convert a single DynamoDB value to a native Python type.
+
+    Conversion rules:
+        - ``Decimal`` with no fractional part -> ``int``
+        - ``Decimal`` with fractional part -> ``float``
+        - ``set`` -> sorted ``list`` (elements are also normalized)
+        - ``dict`` -> recursively normalized ``dict``
+        - ``list`` -> recursively normalized ``list``
+        - All other types are returned unchanged.
+
+    Args:
+        value: A value as returned by boto3's DynamoDB resource layer.
+
+    Returns:
+        The equivalent native Python value.
+    """
     if isinstance(value, Decimal):
         # Preserve int vs float distinction
         if value == int(value):

@@ -1,4 +1,20 @@
-"""Query and Get builders — fluent API for DynamoDB reads."""
+"""Query and Scan builders — fluent API for DynamoDB reads.
+
+Provides :class:`QueryBuilder`, a chainable builder that constructs
+DynamoDB ``Query`` or ``Scan`` parameters and executes them.
+
+Example::
+
+    # Fluent query with sort key condition, filter, and projection
+    result = (
+        orders.query(user_id="u1")
+        .where(begins_with="ord_")
+        .filter(status__eq="shipped")
+        .select("order_id", "total")
+        .limit(10)
+        .execute()
+    )
+"""
 
 from __future__ import annotations
 
@@ -19,7 +35,25 @@ logger = logging.getLogger("dkmio")
 
 
 class QueryBuilder:
-    """Builder for Query and Scan operations with fluent API."""
+    """Builder for DynamoDB Query and Scan operations with a fluent API.
+
+    Constructed by :meth:`Table.query`, :meth:`Table.scan`, or
+    :meth:`IndexAccessor.query`. Supports chained calls for sort key
+    conditions, filters, projections, pagination, and ordering.
+
+    The builder is lazy — no DynamoDB call is made until :meth:`execute`,
+    :meth:`fetch_all`, :meth:`count`, or iteration is triggered.
+
+    ``QueryBuilder`` is iterable, indexable, and supports ``len()`` and
+    ``bool()``, all of which implicitly call :meth:`execute`.
+
+    Args:
+        table: The table instance to query.
+        pk_name: Partition key attribute name (``None`` for scans).
+        pk_value: Partition key value (``None`` for scans).
+        index: Optional :class:`~dkmio.fields.Index` to query against.
+        is_scan: If ``True``, perform a Scan instead of a Query.
+    """
 
     def __init__(
         self,
@@ -121,7 +155,15 @@ class QueryBuilder:
         return self
 
     def explain(self) -> dict[str, Any]:
-        """Show the DynamoDB operation without executing it."""
+        """Return the DynamoDB operation parameters without executing.
+
+        Useful for debugging, logging, or understanding what the builder
+        will send to DynamoDB.
+
+        Returns:
+            A dict with keys like ``operation``, ``table``, ``index``,
+            ``key_condition``, ``filter``, ``projection``, etc.
+        """
         params = self._build_params()
         result: dict[str, Any] = {
             "operation": "Scan" if self._is_scan else "Query",
@@ -144,7 +186,15 @@ class QueryBuilder:
         return result
 
     def execute(self) -> QueryResult:
-        """Execute the query/scan and return a QueryResult."""
+        """Execute the query/scan and return a :class:`~dkmio.pagination.QueryResult`.
+
+        Results are cached — calling ``execute()`` multiple times returns
+        the same result without extra DynamoDB calls.
+
+        Returns:
+            A :class:`~dkmio.pagination.QueryResult` with the items,
+            pagination key, and count metadata.
+        """
         if self._result is not None:
             return self._result
 
@@ -216,7 +266,15 @@ class QueryBuilder:
         )
 
     def count(self) -> int:
-        """Execute with Select=COUNT and return the total count across all pages."""
+        """Return the total count of matching items across all pages.
+
+        Executes the query/scan with ``Select=COUNT`` so DynamoDB
+        only returns counts, not item data. Iterates through all
+        pages automatically.
+
+        Returns:
+            The total number of items matching the query conditions.
+        """
         # Build params without projection to avoid conflicts with SELECT=COUNT
         saved_projection = self._projection
         self._projection = None
@@ -272,6 +330,7 @@ class QueryBuilder:
                 )
 
     def _build_params(self) -> dict[str, Any]:
+        """Build the full DynamoDB API parameter dict from builder state."""
         builder = ExpressionBuilder()
         params: dict[str, Any] = {}
 
@@ -343,13 +402,17 @@ class QueryBuilder:
 
     # Make QueryBuilder iterable and indexable (delegates to execute)
     def __iter__(self):
+        """Iterate over result items, executing the query if needed."""
         return iter(self.execute())
 
     def __len__(self) -> int:
+        """Return the number of result items, executing the query if needed."""
         return len(self.execute())
 
     def __getitem__(self, index):
+        """Access a result item by index, executing the query if needed."""
         return self.execute()[index]
 
     def __bool__(self) -> bool:
+        """Return ``True`` if the query returned at least one item."""
         return bool(self.execute())
