@@ -97,6 +97,31 @@ class TestUpdate:
         assert "urgent" in item["tags"]
         assert "initial" in item["tags"]
 
+    def test_update_add_list_of_strings(self, setup):
+        """add= with a list (JSON-native) works like a set union — the reported bug."""
+        orders = setup
+        orders.put(user_id="usr_1", order_id="ord_1", tags={"initial"})
+        orders.update(
+            user_id="usr_1", order_id="ord_1",
+            add={"tags": ["express", "vip"]},
+        )
+        item = orders.get(user_id="usr_1", order_id="ord_1")
+        assert "express" in item["tags"]
+        assert "vip" in item["tags"]
+        assert "initial" in item["tags"]
+
+    def test_update_add_list_of_numbers(self, setup):
+        """add= with a list of numbers performs a numeric set union."""
+        orders = setup
+        orders.put(user_id="usr_1", order_id="ord_1", scores={10, 20})
+        orders.update(
+            user_id="usr_1", order_id="ord_1",
+            add={"scores": [30, 40]},
+        )
+        item = orders.get(user_id="usr_1", order_id="ord_1")
+        assert 30 in item["scores"]
+        assert 10 in item["scores"]
+
     def test_update_delete_set_type(self, setup):
         orders = setup
         orders.put(user_id="usr_1", order_id="ord_1", tags={"a", "b", "c"})
@@ -106,6 +131,19 @@ class TestUpdate:
         )
         item = orders.get(user_id="usr_1", order_id="ord_1")
         assert "b" not in item["tags"]
+        assert "a" in item["tags"]
+
+    def test_update_delete_list(self, setup):
+        """delete= with a list (JSON-native) works like set subtraction — same bug as add=."""
+        orders = setup
+        orders.put(user_id="usr_1", order_id="ord_1", tags={"a", "b", "c"})
+        orders.update(
+            user_id="usr_1", order_id="ord_1",
+            delete={"tags": ["b", "c"]},
+        )
+        item = orders.get(user_id="usr_1", order_id="ord_1")
+        assert "b" not in item["tags"]
+        assert "c" not in item["tags"]
         assert "a" in item["tags"]
 
     def test_update_append_list(self, setup):

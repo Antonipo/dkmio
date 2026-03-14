@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2] - 2026-03-14
+
+### Fixed
+- **`add=` and `delete=` now accept lists** — passing a Python `list` to `add=` or `delete=` in `update()` now works correctly. Previously, `add={"tags": ["express"]}` raised a DynamoDB `ValidationException` because a `list` was sent as DynamoDB type `L` instead of the required `SS`/`NS`/`BS`. dkmio now converts `list → set` before sending, letting boto3 serialize it to the correct set type. This also fixes `delete=` which had the same problem but was not reported. Root cause: `serialize.py` intentionally converts DynamoDB sets to lists on read (for JSON compatibility), creating a round-trip trap where the value you read back couldn't be passed directly to `add=`/`delete=`.
+
+---
+
 ## [0.8.1] - 2026-03-14
 
 ### Added

@@ -291,10 +291,39 @@ class TestBuildUpdate:
         expr = b.build_update(add={"tags": {"urgent", "priority"}})
         assert "ADD #tags :v0" in expr
 
+    def test_add_list_converted_to_set(self):
+        """List passed to add= is converted to a Python set for boto3 SS/NS/BS serialization."""
+        b = ExpressionBuilder()
+        expr = b.build_update(add={"tags": ["express", "vip"]})
+        assert "ADD #tags :v0" in expr
+        # Value stored must be a set, not a list, so boto3 sends SS not L
+        assert isinstance(b._values[":v0"], set)
+        assert b._values[":v0"] == {"express", "vip"}
+
+    def test_add_list_of_numbers_converted_to_set(self):
+        b = ExpressionBuilder()
+        b.build_update(add={"scores": [1, 2, 3]})
+        assert isinstance(b._values[":v0"], set)
+        assert b._values[":v0"] == {1, 2, 3}
+
+    def test_add_number_unchanged(self):
+        """Numeric increment (add={"counter": 1}) is not affected by the list→set conversion."""
+        b = ExpressionBuilder()
+        b.build_update(add={"counter": 1})
+        assert b._values[":v0"] == 1
+        assert isinstance(b._values[":v0"], int)
+
     def test_delete(self):
         b = ExpressionBuilder()
         expr = b.build_update(delete={"tags": {"old_tag"}})
         assert "DELETE #tags :v0" in expr
+
+    def test_delete_list_converted_to_set(self):
+        """List passed to delete= is converted to a Python set (same issue as add=)."""
+        b = ExpressionBuilder()
+        b.build_update(delete={"tags": ["express"]})
+        assert isinstance(b._values[":v0"], set)
+        assert b._values[":v0"] == {"express"}
 
     def test_combined(self):
         b = ExpressionBuilder()

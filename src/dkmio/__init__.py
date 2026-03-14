@@ -30,7 +30,7 @@ Exports:
     DkmioError and subclasses: Exception hierarchy.
 """
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 
 from ._types import TableProtocol
 from .circuit_breaker import CircuitBreakerConfig

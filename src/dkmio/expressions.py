@@ -334,6 +334,12 @@ class ExpressionBuilder:
             add_parts = []
             for attr, value in add.items():
                 name = self.add_name(attr)
+                # DynamoDB ADD for set union requires a Set type (SS/NS/BS).
+                # Lists are the natural JSON representation users receive from
+                # reads (serialize.py converts sets→lists). Convert back so
+                # boto3 serializes correctly instead of sending a List (L).
+                if isinstance(value, list):
+                    value = set(value)
                 val = self.add_value(value)
                 add_parts.append(f"{name} {val}")
             clauses.append("ADD " + ", ".join(add_parts))
@@ -343,6 +349,10 @@ class ExpressionBuilder:
             del_parts = []
             for attr, value in delete.items():
                 name = self.add_name(attr)
+                # DynamoDB DELETE always operates on sets; same list→set
+                # conversion as ADD above.
+                if isinstance(value, list):
+                    value = set(value)
                 val = self.add_value(value)
                 del_parts.append(f"{name} {val}")
             clauses.append("DELETE " + ", ".join(del_parts))
