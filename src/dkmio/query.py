@@ -27,7 +27,7 @@ from ._types import TableProtocol
 from .exceptions import InvalidProjectionError, ValidationError
 from .expressions import _SK_OPERATORS, ExpressionBuilder
 from .fields import Index, SKCondition
-from .operations import map_boto3_error
+from .operations import _get_logger, map_boto3_error
 from .pagination import QueryResult
 from .serialize import normalize_items
 
@@ -202,7 +202,7 @@ class QueryBuilder:
         table = self._table._dynamo_table
         op = "scan" if self._is_scan else "query"
         idx = self._index.index_name if self._index else "table"
-        logger.debug("%s on %s (%s)", op, self._table.__table_name__, idx)
+        _get_logger(self._table._db).debug("%s on %s (%s)", op, self._table.__table_name__, idx)
 
         from .operations import _run
 

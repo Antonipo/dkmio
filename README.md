@@ -975,21 +975,100 @@ order = orders.get(user_id="usr_123", order_id="ord_456")
 
 ## Logging
 
-dkmio uses Python's standard `logging` module with the logger name `"dkmio"`.
+dkmio uses Python's standard `logging` module under the logger name `"dkmio"`. There are two ways to configure it.
+
+### Log levels
 
 ```python
 import logging
 
-# See all dkmio operations
+# See every DynamoDB operation (put, get, query, batch, transactions, connection)
 logging.getLogger("dkmio").setLevel(logging.DEBUG)
 
-# Only see warnings (retries, unprocessed items)
+# Only see warnings (batch retries, unprocessed items)
 logging.getLogger("dkmio").setLevel(logging.WARNING)
 ```
 
-Log levels used:
-- **DEBUG** -- every operation: `put_item on orders`, `query on orders (gsi-status-date)`, `batch_write_item on orders (5 ops)`, connection events
-- **WARNING** -- batch retries: `batch_write retry 1 on orders`, `batch_read retry 2 on orders`
+Log levels emitted:
+- **DEBUG** — every operation: `put_item on orders`, `query on orders (gsi-status-date)`, `batch_write_item on orders (5 ops)`, `connecting to DynamoDB`
+- **WARNING** — batch retries: `batch_write retry 1 on orders`, `batch_read retry 2 on orders`
+
+### JSON logs (custom formatter)
+
+To get structured JSON logs from dkmio, attach a custom formatter to the `"dkmio"` logger. No external dependencies needed:
+
+```python
+import json
+import logging
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps({
+            "time":    self.formatTime(record, self.datefmt),
+            "level":   record.levelname,
+            "logger":  record.name,
+            "message": record.getMessage(),
+        })
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+
+dkmio_logger = logging.getLogger("dkmio")
+dkmio_logger.setLevel(logging.DEBUG)
+dkmio_logger.addHandler(handler)
+dkmio_logger.propagate = False  # don't double-log if root logger also has a handler
+```
+
+Output example:
+
+```json
+{"time": "2026-03-14 12:00:01,234", "level": "DEBUG", "logger": "dkmio", "message": "connecting to DynamoDB"}
+{"time": "2026-03-14 12:00:01,310", "level": "DEBUG", "logger": "dkmio", "message": "put_item on orders"}
+{"time": "2026-03-14 12:00:01,420", "level": "DEBUG", "logger": "dkmio", "message": "query on orders (gsi-status-date)"}
+```
+
+If you're already using [python-json-logger](https://github.com/madzak/python-json-logger):
+
+```python
+from pythonjsonlogger import jsonlogger
+
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(time)s %(level)s %(name)s %(message)s"))
+logging.getLogger("dkmio").addHandler(handler)
+```
+
+### Route dkmio logs through your app's logger
+
+If you want dkmio logs to appear under your own logger hierarchy instead of `"dkmio"`, pass a `logger=` argument to `DynamoDB`:
+
+```python
+import logging
+from dkmio import DynamoDB, PK, SK
+
+# All dkmio operations will log to "myapp.dynamo" instead of "dkmio"
+app_logger = logging.getLogger("myapp.dynamo")
+app_logger.setLevel(logging.DEBUG)
+
+db = DynamoDB(
+    region_name="us-east-1",
+    logger=app_logger,
+)
+
+class Orders(db.Table):
+    __table_name__ = "orders"
+    pk = PK("user_id")
+    sk = SK("order_id")
+
+orders = Orders()
+orders.put(user_id="u1", order_id="o1", total=99)
+# logs: DEBUG myapp.dynamo - put_item on orders
+```
+
+This is useful when your project centralises all logging under one name (`"myapp"`) and you want dkmio to participate in that hierarchy automatically, inheriting its handlers and level.
+
+> **Note:** `logger=` only affects dkmio's own internal log messages (operations, retries, connection events). It does not affect boto3/botocore logs, which are controlled separately via `logging.getLogger("boto3")` and `logging.getLogger("botocore")`.
 
 ## Type checking
 

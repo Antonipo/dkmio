@@ -12,9 +12,8 @@ from typing import Any
 
 import boto3
 
-logger = logging.getLogger("dkmio")
-
 _UNSET = object()
+_default_logger = logging.getLogger("dkmio")
 
 
 class DynamoDB:
@@ -34,6 +33,7 @@ class DynamoDB:
         endpoint_url: str | None = None,
         region_name: str | None = None,
         circuit_breaker: Any = _UNSET,
+        logger: logging.Logger | None = None,
     ) -> None:
         """Initialize the DynamoDB connection manager.
 
@@ -57,6 +57,9 @@ class DynamoDB:
                 to enable the circuit breaker with custom settings, ``None``
                 to disable it, or omit to use the default configuration
                 (``failure_threshold=5``, ``recovery_timeout=30``).
+            logger: A :class:`logging.Logger` instance to use for all
+                dkmio log output (operations, retries, connection events).
+                If omitted, logs to ``logging.getLogger("dkmio")``.
 
         Example::
 
@@ -79,11 +82,20 @@ class DynamoDB:
 
             # Disable circuit breaker
             db = DynamoDB(region_name="us-east-1", circuit_breaker=None)
+
+            # Route dkmio logs through your own logger
+            import logging
+            db = DynamoDB(
+                region_name="us-east-1",
+                logger=logging.getLogger("myapp.dynamo"),
+            )
         """
         self._resource = resource
         self._session = session
         self._endpoint_url = endpoint_url
         self._region_name = region_name
+
+        self._logger: logging.Logger = logger if logger is not None else _default_logger
 
         from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
 
@@ -135,7 +147,7 @@ class DynamoDB:
         if self._region_name:
             kwargs["region_name"] = self._region_name
 
-        logger.debug("connecting to DynamoDB")
+        self._logger.debug("connecting to DynamoDB")
         self._resource = boto3.resource("dynamodb", **kwargs)
         return self._resource
 

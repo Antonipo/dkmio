@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.1] - 2026-03-14
+
+### Added
+- **`DynamoDB(logger=)`** — pass any `logging.Logger` to route all dkmio log output (operations, retries, connection events) through your own logger instead of the default `logging.getLogger("dkmio")`. Covers all call sites: get, put, update, delete, batch_read, batch_write, query, scan, and transactions.
+- **Logging docs** — expanded README Logging section with: JSON formatter example (stdlib-only), `python-json-logger` snippet, and full `logger=` usage with output sample.
+
+---
+
 ## [0.8.0] - 2026-03-13
 
 ### Added
