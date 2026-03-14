@@ -277,16 +277,25 @@ class WriteTransaction:
 
         from botocore.exceptions import ClientError
 
-        logger.debug("transact_write_items (%d ops)", len(self._items))
-        try:
-            self._get_client().transact_write_items(TransactItems=self._items)
-        except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            if error_code == "TransactionCanceledException":
-                raise TransactionError(
-                    f"Transaction cancelled: {e.response['Error'].get('Message', str(e))}"
-                ) from e
-            raise map_boto3_error(e) from e
+        from .operations import _run
+
+        items = self._items
+        client = self._get_client()
+
+        logger.debug("transact_write_items (%d ops)", len(items))
+
+        def _call() -> Any:
+            try:
+                return client.transact_write_items(TransactItems=items)
+            except ClientError as e:
+                error_code = e.response["Error"]["Code"]
+                if error_code == "TransactionCanceledException":
+                    raise TransactionError(
+                        f"Transaction cancelled: {e.response['Error'].get('Message', str(e))}"
+                    ) from e
+                raise map_boto3_error(e) from e
+
+        _run(self._db, _call)
 
 
 class ReadTransaction:
@@ -360,11 +369,20 @@ class ReadTransaction:
 
         from botocore.exceptions import ClientError
 
-        logger.debug("transact_get_items (%d ops)", len(self._items))
-        try:
-            response = self._get_client().transact_get_items(TransactItems=self._items)
-        except ClientError as e:
-            raise map_boto3_error(e) from e
+        from .operations import _run
+
+        items = self._items
+        client = self._get_client()
+
+        logger.debug("transact_get_items (%d ops)", len(items))
+
+        def _call() -> Any:
+            try:
+                return client.transact_get_items(TransactItems=items)
+            except ClientError as e:
+                raise map_boto3_error(e) from e
+
+        response = _run(self._db, _call)
 
         self._results = []
         for resp in response.get("Responses", []):

@@ -358,10 +358,15 @@ class Table(metaclass=TableMeta):
         if consistent:
             params["ConsistentRead"] = True
 
-        try:
-            response = self._dynamo_table.get_item(**params)
-        except ClientError as e:
-            raise map_boto3_error(e) from e
+        from .operations import _run
+
+        def _call() -> Any:
+            try:
+                return self._dynamo_table.get_item(**params)
+            except ClientError as e:
+                raise map_boto3_error(e) from e
+
+        response = _run(self._db, _call)
         raw: dict[str, Any] | None = response.get("Item")
         return normalize_item(raw) if raw is not None else None
 

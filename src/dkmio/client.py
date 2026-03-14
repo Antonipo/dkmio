@@ -14,6 +14,7 @@ import boto3
 
 logger = logging.getLogger("dkmio")
 
+_UNSET = object()
 
 
 class DynamoDB:
@@ -32,6 +33,7 @@ class DynamoDB:
         session: Any = None,
         endpoint_url: str | None = None,
         region_name: str | None = None,
+        circuit_breaker: Any = _UNSET,
     ) -> None:
         """Initialize the DynamoDB connection manager.
 
@@ -51,6 +53,10 @@ class DynamoDB:
             endpoint_url: DynamoDB endpoint URL. Use
                 ``"http://localhost:8000"`` for DynamoDB Local.
             region_name: AWS region name (e.g. ``"us-east-1"``).
+            circuit_breaker: A :class:`~dkmio.circuit_breaker.CircuitBreakerConfig`
+                to enable the circuit breaker with custom settings, ``None``
+                to disable it, or omit to use the default configuration
+                (``failure_threshold=5``, ``recovery_timeout=30``).
 
         Example::
 
@@ -63,11 +69,43 @@ class DynamoDB:
             # Custom session (e.g. with a specific profile)
             session = boto3.Session(profile_name="dev")
             db = DynamoDB(session=session)
+
+            # Custom circuit breaker config
+            from dkmio import CircuitBreakerConfig
+            db = DynamoDB(
+                region_name="us-east-1",
+                circuit_breaker=CircuitBreakerConfig(failure_threshold=3, recovery_timeout=60),
+            )
+
+            # Disable circuit breaker
+            db = DynamoDB(region_name="us-east-1", circuit_breaker=None)
         """
         self._resource = resource
         self._session = session
         self._endpoint_url = endpoint_url
         self._region_name = region_name
+
+        from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig
+
+        if circuit_breaker is _UNSET:
+            self._circuit_breaker: CircuitBreaker | None = CircuitBreaker(CircuitBreakerConfig())
+        elif circuit_breaker is None:
+            self._circuit_breaker = None
+        else:
+            self._circuit_breaker = CircuitBreaker(circuit_breaker)
+
+    @property
+    def circuit_breaker(self) -> Any:
+        """The active :class:`~dkmio.circuit_breaker.CircuitBreaker`, or ``None`` if disabled.
+
+        Use :attr:`~dkmio.circuit_breaker.CircuitBreaker.state` to inspect
+        the current state and :meth:`~dkmio.circuit_breaker.CircuitBreaker.reset`
+        to reset manually::
+
+            db.circuit_breaker.state   # "closed" | "open" | "half_open"
+            db.circuit_breaker.reset() # force back to closed
+        """
+        return self._circuit_breaker
 
     @property
     def resource(self) -> Any:

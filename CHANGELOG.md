@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.0] - 2026-03-13
+
+### Added
+- **Circuit breaker** — built-in CLOSED/OPEN/HALF_OPEN protection against DynamoDB outages and severe throttling.
+  - Active by default with `failure_threshold=5` and `recovery_timeout=30s`. Pass `circuit_breaker=CircuitBreakerConfig(...)` to customize, or `circuit_breaker=None` to disable.
+  - Only infrastructure errors (throttling, unclassified AWS errors) count against the circuit. Client errors (`ConditionError`, `ValidationError`, `MissingKeyError`, etc.) never trip it.
+  - Thread-safe: concurrent requests during HALF_OPEN get `CircuitOpenError` while the probe is in flight.
+  - `db.circuit_breaker.state` — inspect current state (`"closed"`, `"open"`, `"half_open"`).
+  - `db.circuit_breaker.reset()` — manual reset for health checks and admin tooling.
+- **`CircuitOpenError`** — new exception raised when a call is rejected by an open circuit. Subclass of `DkmioError`. Catch it to implement fallback logic.
+- **`CircuitBreakerConfig`** — dataclass for circuit breaker configuration. Exported from `dkmio` top-level.
+
+---
+
 ## [0.7.1] - 2026-03-02
 
 ### Added

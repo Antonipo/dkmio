@@ -57,6 +57,7 @@ orders.put(user_id="usr_123", order_id="ord_789", status="NEW", total=250,
 - [Filter operators](#filter-operators)
 - [Debug with explain()](#debug-with-explain)
 - [Exceptions and error handling](#exceptions-and-error-handling)
+- [Circuit breaker](#circuit-breaker)
 - [Connection options](#connection-options)
 - [Framework integration](#framework-integration)
 - [Logging](#logging)
@@ -77,6 +78,7 @@ orders.put(user_id="usr_123", order_id="ord_789", status="NEW", total=250,
 - **Conditional writes** -- `condition=` (AND) and `condition_or=` (OR) on put, update, and delete
 - **ReturnValues** -- get previous or updated item from put, update, delete
 - **ACID transactions** -- `transaction.write()` and `transaction.read()` with full condition support
+- **Circuit breaker** -- built-in CLOSED/OPEN/HALF_OPEN protection against DynamoDB outages and severe throttling
 - **Nested paths** -- `set={"address.city": "Lima"}` and `items[0].qty` work everywhere
 - **Structured exceptions** -- `ConditionError`, `ThrottlingError`, `TransactionError`, etc. instead of raw `ClientError`
 - **Structured logging** -- `logging.getLogger("dkmio")` with DEBUG for operations and WARNING for retries
@@ -661,6 +663,80 @@ try:
 except MissingKeyError as e:
     print(e)  # "get() requires the full key. Missing: order_id. Use .query() to search by partition key."
 ```
+
+## Circuit breaker
+
+dkmio includes a built-in circuit breaker that protects your application from cascading failures when DynamoDB is unavailable or under severe throttling.
+
+### How it works
+
+```
+CLOSED (normal) → N consecutive infra failures → OPEN (rejects all calls instantly)
+                                                        ↓ after recovery_timeout seconds
+                                                   HALF_OPEN (one probe request allowed)
+                                                        ↓ if probe succeeds
+                                                   CLOSED (back to normal)
+```
+
+- **CLOSED** — all calls pass through normally
+- **OPEN** — every call raises `CircuitOpenError` immediately, without touching DynamoDB. Users get a fast error instead of waiting for timeouts to cascade
+- **HALF_OPEN** — one probe request is allowed through to test if DynamoDB recovered
+
+The circuit only trips on **infrastructure errors** (throttling, outages, unclassified AWS errors). Client errors like `ConditionError`, `ValidationError`, and `MissingKeyError` never count — those are logic bugs, not infra failures.
+
+### Default configuration
+
+The circuit breaker is **active by default** with sensible settings:
+
+```python
+# Default: failure_threshold=5, recovery_timeout=30s
+db = DynamoDB(region_name="us-east-1")
+```
+
+### Custom configuration
+
+```python
+from dkmio import DynamoDB, CircuitBreakerConfig
+
+db = DynamoDB(
+    region_name="us-east-1",
+    circuit_breaker=CircuitBreakerConfig(
+        failure_threshold=3,   # open after 3 consecutive infra failures
+        recovery_timeout=60,   # wait 60s before probing
+    ),
+)
+```
+
+### Disable the circuit breaker
+
+```python
+db = DynamoDB(region_name="us-east-1", circuit_breaker=None)
+```
+
+### Catching `CircuitOpenError`
+
+Use it to implement fallback logic (cache, degraded mode, etc.):
+
+```python
+from dkmio.exceptions import CircuitOpenError
+
+try:
+    order = orders.get(user_id="usr_123", order_id="ord_456")
+except CircuitOpenError:
+    order = cache.get("usr_123:ord_456")  # serve from cache
+```
+
+### Inspecting and resetting state
+
+```python
+# Useful for health-check endpoints
+db.circuit_breaker.state  # "closed" | "open" | "half_open"
+
+# Manual reset (e.g. after a deployment or admin action)
+db.circuit_breaker.reset()
+```
+
+---
 
 ## Connection options
 
