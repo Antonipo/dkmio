@@ -494,7 +494,9 @@ class BatchWriter:
         table_name = self._table.__table_name__
         resource = self._table._db.resource
 
-        _get_logger(self._table._db).debug("batch_write_item on %s (%d ops)", table_name, len(self._operations))
+        _get_logger(self._table._db).debug(
+            "batch_write_item on %s (%d ops)", table_name, len(self._operations)
+        )
         # Process in chunks of 25
         for i in range(0, len(self._operations), 25):
             chunk = self._operations[i : i + 25]
@@ -525,6 +527,8 @@ class BatchWriter:
                         f"batch_write failed after {max_retries} retries "
                         f"with {len(unprocessed.get(table_name, []))} unprocessed items"
                     )
-                _get_logger(self._table._db).warning("batch_write retry %d on %s", retries, table_name)
+                _get_logger(self._table._db).warning(
+                    "batch_write retry %d on %s", retries, table_name
+                )
                 # Exponential backoff
                 time.sleep(2**retries * 0.1)
