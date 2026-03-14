@@ -32,8 +32,10 @@ logger = logging.getLogger("dkmio")
 
 def _get_logger(db: Any) -> logging.Logger:
     """Return the logger configured on *db*, falling back to the dkmio module logger."""
-    if db is not None and hasattr(db, "_logger"):
-        return db._logger
+    if db is not None:
+        db_logger = getattr(db, "_logger", None)
+        if isinstance(db_logger, logging.Logger):
+            return db_logger
     return logger
 
 
