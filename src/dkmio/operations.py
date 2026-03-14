@@ -30,6 +30,28 @@ from .serialize import normalize_item
 logger = logging.getLogger("dkmio")
 
 
+def _get_logger(db: Any) -> logging.Logger:
+    """Return the logger configured on *db*, falling back to the dkmio module logger."""
+    if db is not None:
+        db_logger = getattr(db, "_logger", None)
+        if isinstance(db_logger, logging.Logger):
+            return db_logger
+    return logger
+
+
+def _run(db: Any, fn: Any) -> Any:
+    """Execute *fn()* through the circuit breaker attached to *db*.
+
+    *fn* must be a zero-argument callable that raises :class:`~dkmio.exceptions.DkmioError`
+    on failure (i.e. it should handle its own ``ClientError`` → ``DkmioError`` mapping).
+    If *db* has no circuit breaker configured, *fn* is called directly.
+    """
+    cb = db._circuit_breaker if db is not None else None
+    if cb is None:
+        return fn()
+    return cb.execute(fn)
+
+
 def map_boto3_error(e: Any) -> DkmioError:
     """Map a boto3 ``ClientError`` to a dkmio exception.
 
@@ -116,11 +138,15 @@ def execute_put(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, Any] 
             if values:
                 params["ExpressionAttributeValues"] = values
 
-    logger.debug("put_item on %s", table.__table_name__)
-    try:
-        response = table._dynamo_table.put_item(**params)
-    except ClientError as e:
-        raise map_boto3_error(e) from e
+    _get_logger(table._db).debug("put_item on %s", table.__table_name__)
+
+    def _call() -> Any:
+        try:
+            return table._dynamo_table.put_item(**params)
+        except ClientError as e:
+            raise map_boto3_error(e) from e
+
+    response = _run(table._db, _call)
 
     if return_values:
         raw = response.get("Attributes")
@@ -208,11 +234,15 @@ def execute_update(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, An
     if values:
         params["ExpressionAttributeValues"] = values
 
-    logger.debug("update_item on %s", table.__table_name__)
-    try:
-        response = table._dynamo_table.update_item(**params)
-    except ClientError as e:
-        raise map_boto3_error(e) from e
+    _get_logger(table._db).debug("update_item on %s", table.__table_name__)
+
+    def _call() -> Any:
+        try:
+            return table._dynamo_table.update_item(**params)
+        except ClientError as e:
+            raise map_boto3_error(e) from e
+
+    response = _run(table._db, _call)
 
     if return_values:
         raw = response.get("Attributes")
@@ -271,11 +301,15 @@ def execute_delete(table: TableProtocol, kwargs: dict[str, Any]) -> dict[str, An
             if values:
                 params["ExpressionAttributeValues"] = values
 
-    logger.debug("delete_item on %s", table.__table_name__)
-    try:
-        response = table._dynamo_table.delete_item(**params)
-    except ClientError as e:
-        raise map_boto3_error(e) from e
+    _get_logger(table._db).debug("delete_item on %s", table.__table_name__)
+
+    def _call() -> Any:
+        try:
+            return table._dynamo_table.delete_item(**params)
+        except ClientError as e:
+            raise map_boto3_error(e) from e
+
+    response = _run(table._db, _call)
 
     if return_values:
         raw = response.get("Attributes")
@@ -299,7 +333,7 @@ def execute_batch_read(
     if not keys:
         return []
 
-    logger.debug("batch_get_item on %s (%d keys)", table.__table_name__, len(keys))
+    _get_logger(table._db).debug("batch_get_item on %s (%d keys)", table.__table_name__, len(keys))
     table_name = table.__table_name__
     resource = table._db.resource
 
@@ -341,10 +375,15 @@ def execute_batch_read(
         max_retries = 5
 
         while request_items:
-            try:
-                response = resource.batch_get_item(RequestItems=request_items)
-            except ClientError as e:
-                raise map_boto3_error(e) from e
+            _req = request_items
+
+            def _call(_r=_req) -> Any:
+                try:
+                    return resource.batch_get_item(RequestItems=_r)
+                except ClientError as e:
+                    raise map_boto3_error(e) from e
+
+            response = _run(table._db, _call)
 
             all_results.extend(response.get("Responses", {}).get(table_name, []))
 
@@ -359,7 +398,7 @@ def execute_batch_read(
                     f"batch_read failed after {max_retries} retries "
                     f"with unprocessed keys"
                 )
-            logger.warning("batch_read retry %d on %s", retries, table_name)
+            _get_logger(table._db).warning("batch_read retry %d on %s", retries, table_name)
             time.sleep(2**retries * 0.1)
 
     # Build lookup index from results to preserve input order
@@ -457,7 +496,9 @@ class BatchWriter:
         table_name = self._table.__table_name__
         resource = self._table._db.resource
 
-        logger.debug("batch_write_item on %s (%d ops)", table_name, len(self._operations))
+        _get_logger(self._table._db).debug(
+            "batch_write_item on %s (%d ops)", table_name, len(self._operations)
+        )
         # Process in chunks of 25
         for i in range(0, len(self._operations), 25):
             chunk = self._operations[i : i + 25]
@@ -467,10 +508,15 @@ class BatchWriter:
             max_retries = 5
 
             while request_items:
-                try:
-                    response = resource.batch_write_item(RequestItems=request_items)
-                except ClientError as e:
-                    raise map_boto3_error(e) from e
+                _req = request_items
+
+                def _call(_r=_req) -> Any:
+                    try:
+                        return resource.batch_write_item(RequestItems=_r)
+                    except ClientError as e:
+                        raise map_boto3_error(e) from e
+
+                response = _run(self._table._db, _call)
 
                 unprocessed = response.get("UnprocessedItems", {})
                 if not unprocessed:
@@ -483,6 +529,8 @@ class BatchWriter:
                         f"batch_write failed after {max_retries} retries "
                         f"with {len(unprocessed.get(table_name, []))} unprocessed items"
                     )
-                logger.warning("batch_write retry %d on %s", retries, table_name)
+                _get_logger(self._table._db).warning(
+                    "batch_write retry %d on %s", retries, table_name
+                )
                 # Exponential backoff
                 time.sleep(2**retries * 0.1)

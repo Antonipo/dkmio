@@ -57,6 +57,7 @@ orders.put(user_id="usr_123", order_id="ord_789", status="NEW", total=250,
 - [Filter operators](#filter-operators)
 - [Debug with explain()](#debug-with-explain)
 - [Exceptions and error handling](#exceptions-and-error-handling)
+- [Circuit breaker](#circuit-breaker)
 - [Connection options](#connection-options)
 - [Framework integration](#framework-integration)
 - [Logging](#logging)
@@ -77,6 +78,7 @@ orders.put(user_id="usr_123", order_id="ord_789", status="NEW", total=250,
 - **Conditional writes** -- `condition=` (AND) and `condition_or=` (OR) on put, update, and delete
 - **ReturnValues** -- get previous or updated item from put, update, delete
 - **ACID transactions** -- `transaction.write()` and `transaction.read()` with full condition support
+- **Circuit breaker** -- built-in CLOSED/OPEN/HALF_OPEN protection against DynamoDB outages and severe throttling
 - **Nested paths** -- `set={"address.city": "Lima"}` and `items[0].qty` work everywhere
 - **Structured exceptions** -- `ConditionError`, `ThrottlingError`, `TransactionError`, etc. instead of raw `ClientError`
 - **Structured logging** -- `logging.getLogger("dkmio")` with DEBUG for operations and WARNING for retries
@@ -662,6 +664,80 @@ except MissingKeyError as e:
     print(e)  # "get() requires the full key. Missing: order_id. Use .query() to search by partition key."
 ```
 
+## Circuit breaker
+
+dkmio includes a built-in circuit breaker that protects your application from cascading failures when DynamoDB is unavailable or under severe throttling.
+
+### How it works
+
+```
+CLOSED (normal) → N consecutive infra failures → OPEN (rejects all calls instantly)
+                                                        ↓ after recovery_timeout seconds
+                                                   HALF_OPEN (one probe request allowed)
+                                                        ↓ if probe succeeds
+                                                   CLOSED (back to normal)
+```
+
+- **CLOSED** — all calls pass through normally
+- **OPEN** — every call raises `CircuitOpenError` immediately, without touching DynamoDB. Users get a fast error instead of waiting for timeouts to cascade
+- **HALF_OPEN** — one probe request is allowed through to test if DynamoDB recovered
+
+The circuit only trips on **infrastructure errors** (throttling, outages, unclassified AWS errors). Client errors like `ConditionError`, `ValidationError`, and `MissingKeyError` never count — those are logic bugs, not infra failures.
+
+### Default configuration
+
+The circuit breaker is **active by default** with sensible settings:
+
+```python
+# Default: failure_threshold=5, recovery_timeout=30s
+db = DynamoDB(region_name="us-east-1")
+```
+
+### Custom configuration
+
+```python
+from dkmio import DynamoDB, CircuitBreakerConfig
+
+db = DynamoDB(
+    region_name="us-east-1",
+    circuit_breaker=CircuitBreakerConfig(
+        failure_threshold=3,   # open after 3 consecutive infra failures
+        recovery_timeout=60,   # wait 60s before probing
+    ),
+)
+```
+
+### Disable the circuit breaker
+
+```python
+db = DynamoDB(region_name="us-east-1", circuit_breaker=None)
+```
+
+### Catching `CircuitOpenError`
+
+Use it to implement fallback logic (cache, degraded mode, etc.):
+
+```python
+from dkmio.exceptions import CircuitOpenError
+
+try:
+    order = orders.get(user_id="usr_123", order_id="ord_456")
+except CircuitOpenError:
+    order = cache.get("usr_123:ord_456")  # serve from cache
+```
+
+### Inspecting and resetting state
+
+```python
+# Useful for health-check endpoints
+db.circuit_breaker.state  # "closed" | "open" | "half_open"
+
+# Manual reset (e.g. after a deployment or admin action)
+db.circuit_breaker.reset()
+```
+
+---
+
 ## Connection options
 
 ```python
@@ -899,21 +975,100 @@ order = orders.get(user_id="usr_123", order_id="ord_456")
 
 ## Logging
 
-dkmio uses Python's standard `logging` module with the logger name `"dkmio"`.
+dkmio uses Python's standard `logging` module under the logger name `"dkmio"`. There are two ways to configure it.
+
+### Log levels
 
 ```python
 import logging
 
-# See all dkmio operations
+# See every DynamoDB operation (put, get, query, batch, transactions, connection)
 logging.getLogger("dkmio").setLevel(logging.DEBUG)
 
-# Only see warnings (retries, unprocessed items)
+# Only see warnings (batch retries, unprocessed items)
 logging.getLogger("dkmio").setLevel(logging.WARNING)
 ```
 
-Log levels used:
-- **DEBUG** -- every operation: `put_item on orders`, `query on orders (gsi-status-date)`, `batch_write_item on orders (5 ops)`, connection events
-- **WARNING** -- batch retries: `batch_write retry 1 on orders`, `batch_read retry 2 on orders`
+Log levels emitted:
+- **DEBUG** — every operation: `put_item on orders`, `query on orders (gsi-status-date)`, `batch_write_item on orders (5 ops)`, `connecting to DynamoDB`
+- **WARNING** — batch retries: `batch_write retry 1 on orders`, `batch_read retry 2 on orders`
+
+### JSON logs (custom formatter)
+
+To get structured JSON logs from dkmio, attach a custom formatter to the `"dkmio"` logger. No external dependencies needed:
+
+```python
+import json
+import logging
+
+
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        return json.dumps({
+            "time":    self.formatTime(record, self.datefmt),
+            "level":   record.levelname,
+            "logger":  record.name,
+            "message": record.getMessage(),
+        })
+
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+
+dkmio_logger = logging.getLogger("dkmio")
+dkmio_logger.setLevel(logging.DEBUG)
+dkmio_logger.addHandler(handler)
+dkmio_logger.propagate = False  # don't double-log if root logger also has a handler
+```
+
+Output example:
+
+```json
+{"time": "2026-03-14 12:00:01,234", "level": "DEBUG", "logger": "dkmio", "message": "connecting to DynamoDB"}
+{"time": "2026-03-14 12:00:01,310", "level": "DEBUG", "logger": "dkmio", "message": "put_item on orders"}
+{"time": "2026-03-14 12:00:01,420", "level": "DEBUG", "logger": "dkmio", "message": "query on orders (gsi-status-date)"}
+```
+
+If you're already using [python-json-logger](https://github.com/madzak/python-json-logger):
+
+```python
+from pythonjsonlogger import jsonlogger
+
+handler = logging.StreamHandler()
+handler.setFormatter(jsonlogger.JsonFormatter("%(time)s %(level)s %(name)s %(message)s"))
+logging.getLogger("dkmio").addHandler(handler)
+```
+
+### Route dkmio logs through your app's logger
+
+If you want dkmio logs to appear under your own logger hierarchy instead of `"dkmio"`, pass a `logger=` argument to `DynamoDB`:
+
+```python
+import logging
+from dkmio import DynamoDB, PK, SK
+
+# All dkmio operations will log to "myapp.dynamo" instead of "dkmio"
+app_logger = logging.getLogger("myapp.dynamo")
+app_logger.setLevel(logging.DEBUG)
+
+db = DynamoDB(
+    region_name="us-east-1",
+    logger=app_logger,
+)
+
+class Orders(db.Table):
+    __table_name__ = "orders"
+    pk = PK("user_id")
+    sk = SK("order_id")
+
+orders = Orders()
+orders.put(user_id="u1", order_id="o1", total=99)
+# logs: DEBUG myapp.dynamo - put_item on orders
+```
+
+This is useful when your project centralises all logging under one name (`"myapp"`) and you want dkmio to participate in that hierarchy automatically, inheriting its handlers and level.
+
+> **Note:** `logger=` only affects dkmio's own internal log messages (operations, retries, connection events). It does not affect boto3/botocore logs, which are controlled separately via `logging.getLogger("boto3")` and `logging.getLogger("botocore")`.
 
 ## Type checking
 

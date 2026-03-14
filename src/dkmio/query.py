@@ -27,7 +27,7 @@ from ._types import TableProtocol
 from .exceptions import InvalidProjectionError, ValidationError
 from .expressions import _SK_OPERATORS, ExpressionBuilder
 from .fields import Index, SKCondition
-from .operations import map_boto3_error
+from .operations import _get_logger, map_boto3_error
 from .pagination import QueryResult
 from .serialize import normalize_items
 
@@ -202,15 +202,19 @@ class QueryBuilder:
         table = self._table._dynamo_table
         op = "scan" if self._is_scan else "query"
         idx = self._index.index_name if self._index else "table"
-        logger.debug("%s on %s (%s)", op, self._table.__table_name__, idx)
+        _get_logger(self._table._db).debug("%s on %s (%s)", op, self._table.__table_name__, idx)
 
-        try:
-            if self._is_scan:
-                response = table.scan(**params)
-            else:
-                response = table.query(**params)
-        except ClientError as e:
-            raise map_boto3_error(e) from e
+        from .operations import _run
+
+        def _call() -> Any:
+            try:
+                if self._is_scan:
+                    return table.scan(**params)
+                return table.query(**params)
+            except ClientError as e:
+                raise map_boto3_error(e) from e
+
+        response = _run(self._table._db, _call)
 
         self._result = QueryResult(
             items=normalize_items(response.get("Items", [])),
@@ -233,14 +237,20 @@ class QueryBuilder:
         total_scanned = 0
         last_key = None
 
+        from .operations import _run
+
         while True:
-            try:
-                if self._is_scan:
-                    response = table.scan(**params)
-                else:
-                    response = table.query(**params)
-            except ClientError as e:
-                raise map_boto3_error(e) from e
+            _p = dict(params)
+
+            def _call(_pp=_p) -> Any:
+                try:
+                    if self._is_scan:
+                        return table.scan(**_pp)
+                    return table.query(**_pp)
+                except ClientError as e:
+                    raise map_boto3_error(e) from e
+
+            response = _run(self._table._db, _call)
 
             items = response.get("Items", [])
             total_scanned += response.get("ScannedCount", len(items))
@@ -288,14 +298,20 @@ class QueryBuilder:
         table = self._table._dynamo_table
         total = 0
 
+        from .operations import _run
+
         while True:
-            try:
-                if self._is_scan:
-                    response = table.scan(**params)
-                else:
-                    response = table.query(**params)
-            except ClientError as e:
-                raise map_boto3_error(e) from e
+            _p = dict(params)
+
+            def _call(_pp=_p) -> Any:
+                try:
+                    if self._is_scan:
+                        return table.scan(**_pp)
+                    return table.query(**_pp)
+                except ClientError as e:
+                    raise map_boto3_error(e) from e
+
+            response = _run(self._table._db, _call)
 
             total += response.get("Count", 0)
 

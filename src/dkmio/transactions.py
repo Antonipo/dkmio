@@ -30,7 +30,7 @@ from ._types import TableProtocol
 from .conditions import parse_conditions
 from .exceptions import TransactionError, ValidationError
 from .expressions import ExpressionBuilder
-from .operations import map_boto3_error
+from .operations import _get_logger, map_boto3_error
 from .serialize import normalize_item
 
 logger = logging.getLogger("dkmio")
@@ -68,7 +68,7 @@ class WriteTransaction:
                 - ``condition`` (dict): AND-joined condition expression.
                 - ``condition_or`` (list[dict]): OR-joined condition groups.
         """
-        logger.debug("tx add put on %s", table.__table_name__)
+        _get_logger(table._db).debug("tx add put on %s", table.__table_name__)
         condition = kwargs.pop("condition", None)
         condition_or = kwargs.pop("condition_or", None)
 
@@ -106,7 +106,7 @@ class WriteTransaction:
             MissingKeyError: If the full primary key is not provided.
             ValidationError: If unexpected arguments are passed.
         """
-        logger.debug("tx add update on %s", table.__table_name__)
+        _get_logger(table._db).debug("tx add update on %s", table.__table_name__)
         set_ = kwargs.pop("set", None)
         remove = kwargs.pop("remove", None)
         append = kwargs.pop("append", None)
@@ -164,7 +164,7 @@ class WriteTransaction:
             MissingKeyError: If the full primary key is not provided.
             ValidationError: If unexpected arguments are passed.
         """
-        logger.debug("tx add delete on %s", table.__table_name__)
+        _get_logger(table._db).debug("tx add delete on %s", table.__table_name__)
         condition = kwargs.pop("condition", None)
         condition_or = kwargs.pop("condition_or", None)
 
@@ -213,7 +213,7 @@ class WriteTransaction:
                 is provided, or if unexpected arguments are passed.
             MissingKeyError: If the full primary key is not provided.
         """
-        logger.debug("tx add condition_check on %s", table.__table_name__)
+        _get_logger(table._db).debug("tx add condition_check on %s", table.__table_name__)
         condition = kwargs.pop("condition", None)
         condition_or = kwargs.pop("condition_or", None)
         if not condition and not condition_or:
@@ -277,16 +277,25 @@ class WriteTransaction:
 
         from botocore.exceptions import ClientError
 
-        logger.debug("transact_write_items (%d ops)", len(self._items))
-        try:
-            self._get_client().transact_write_items(TransactItems=self._items)
-        except ClientError as e:
-            error_code = e.response["Error"]["Code"]
-            if error_code == "TransactionCanceledException":
-                raise TransactionError(
-                    f"Transaction cancelled: {e.response['Error'].get('Message', str(e))}"
-                ) from e
-            raise map_boto3_error(e) from e
+        from .operations import _run
+
+        items = self._items
+        client = self._get_client()
+
+        _get_logger(self._db).debug("transact_write_items (%d ops)", len(items))
+
+        def _call() -> Any:
+            try:
+                return client.transact_write_items(TransactItems=items)
+            except ClientError as e:
+                error_code = e.response["Error"]["Code"]
+                if error_code == "TransactionCanceledException":
+                    raise TransactionError(
+                        f"Transaction cancelled: {e.response['Error'].get('Message', str(e))}"
+                    ) from e
+                raise map_boto3_error(e) from e
+
+        _run(self._db, _call)
 
 
 class ReadTransaction:
@@ -325,7 +334,7 @@ class ReadTransaction:
             MissingKeyError: If the full primary key is not provided.
             ValidationError: If unexpected arguments are passed.
         """
-        logger.debug("tx add get on %s", table.__table_name__)
+        _get_logger(table._db).debug("tx add get on %s", table.__table_name__)
         keys, extra = table._extract_keys(kwargs)
         table._validate_full_key(keys, "get")
 
@@ -360,11 +369,20 @@ class ReadTransaction:
 
         from botocore.exceptions import ClientError
 
-        logger.debug("transact_get_items (%d ops)", len(self._items))
-        try:
-            response = self._get_client().transact_get_items(TransactItems=self._items)
-        except ClientError as e:
-            raise map_boto3_error(e) from e
+        from .operations import _run
+
+        items = self._items
+        client = self._get_client()
+
+        _get_logger(self._db).debug("transact_get_items (%d ops)", len(items))
+
+        def _call() -> Any:
+            try:
+                return client.transact_get_items(TransactItems=items)
+            except ClientError as e:
+                raise map_boto3_error(e) from e
+
+        response = _run(self._db, _call)
 
         self._results = []
         for resp in response.get("Responses", []):

@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.8.2] - 2026-03-14
+
+### Fixed
+- **`add=` and `delete=` now accept lists** — passing a Python `list` to `add=` or `delete=` in `update()` now works correctly. Previously, `add={"tags": ["express"]}` raised a DynamoDB `ValidationException` because a `list` was sent as DynamoDB type `L` instead of the required `SS`/`NS`/`BS`. dkmio now converts `list → set` before sending, letting boto3 serialize it to the correct set type. This also fixes `delete=` which had the same problem but was not reported. Root cause: `serialize.py` intentionally converts DynamoDB sets to lists on read (for JSON compatibility), creating a round-trip trap where the value you read back couldn't be passed directly to `add=`/`delete=`.
+
+---
+
+## [0.8.1] - 2026-03-14
+
+### Added
+- **`DynamoDB(logger=)`** — pass any `logging.Logger` to route all dkmio log output (operations, retries, connection events) through your own logger instead of the default `logging.getLogger("dkmio")`. Covers all call sites: get, put, update, delete, batch_read, batch_write, query, scan, and transactions.
+- **Logging docs** — expanded README Logging section with: JSON formatter example (stdlib-only), `python-json-logger` snippet, and full `logger=` usage with output sample.
+
+---
+
+## [0.8.0] - 2026-03-13
+
+### Added
+- **Circuit breaker** — built-in CLOSED/OPEN/HALF_OPEN protection against DynamoDB outages and severe throttling.
+  - Active by default with `failure_threshold=5` and `recovery_timeout=30s`. Pass `circuit_breaker=CircuitBreakerConfig(...)` to customize, or `circuit_breaker=None` to disable.
+  - Only infrastructure errors (throttling, unclassified AWS errors) count against the circuit. Client errors (`ConditionError`, `ValidationError`, `MissingKeyError`, etc.) never trip it.
+  - Thread-safe: concurrent requests during HALF_OPEN get `CircuitOpenError` while the probe is in flight.
+  - `db.circuit_breaker.state` — inspect current state (`"closed"`, `"open"`, `"half_open"`).
+  - `db.circuit_breaker.reset()` — manual reset for health checks and admin tooling.
+- **`CircuitOpenError`** — new exception raised when a call is rejected by an open circuit. Subclass of `DkmioError`. Catch it to implement fallback logic.
+- **`CircuitBreakerConfig`** — dataclass for circuit breaker configuration. Exported from `dkmio` top-level.
+
+---
+
 ## [0.7.1] - 2026-03-02
 
 ### Added

@@ -14,7 +14,8 @@ semantically meaningful Python exceptions::
     ├── ValidationError
     ├── ThrottlingError
     ├── CollectionSizeError
-    └── TransactionError
+    ├── TransactionError
+    └── CircuitOpenError
 """
 
 
@@ -91,4 +92,23 @@ class TransactionError(DkmioError):
     Maps from ``TransactionCanceledException``. Common causes include
     conflicting operations on the same item, failed condition checks
     within the transaction, or exceeding the 100-item transaction limit.
+    """
+
+
+class CircuitOpenError(DkmioError):
+    """Raised when a DynamoDB call is rejected by the circuit breaker.
+
+    The circuit breaker opens after ``failure_threshold`` consecutive
+    infrastructure failures (throttling, outages). Calls are rejected
+    instantly for ``recovery_timeout`` seconds, then a single probe
+    request is allowed through (HALF_OPEN state).
+
+    Catch this to implement fallback logic::
+
+        from dkmio.exceptions import CircuitOpenError
+
+        try:
+            item = orders.get(user_id="u1", order_id="o1")
+        except CircuitOpenError:
+            item = cache.get("u1:o1")
     """

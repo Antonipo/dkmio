@@ -30,11 +30,13 @@ Exports:
     DkmioError and subclasses: Exception hierarchy.
 """
 
-__version__ = "0.7.1"
+__version__ = "0.8.2"
 
 from ._types import TableProtocol
+from .circuit_breaker import CircuitBreakerConfig
 from .client import DynamoDB
 from .exceptions import (
+    CircuitOpenError,
     CollectionSizeError,
     ConditionError,
     DkmioError,
@@ -53,6 +55,7 @@ from .transactions import transaction
 __all__ = [
     "__version__",
     "DynamoDB",
+    "CircuitBreakerConfig",
     "Table",
     "PK",
     "SK",
@@ -70,5 +73,6 @@ __all__ = [
     "ThrottlingError",
     "CollectionSizeError",
     "TransactionError",
+    "CircuitOpenError",
     "TableProtocol",
 ]
